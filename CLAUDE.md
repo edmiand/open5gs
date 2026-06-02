@@ -137,3 +137,14 @@ Single collection: `subscribers`. All DBI functions take a SUPI string and query
 ### Test config
 
 Integration tests use `build/configs/sample.yaml` (generated at configure time). NFs are selectively disabled with `global.parameter.no_<nf>: true`. The test PLMN is MCC=999, MNC=70. NF loopback addresses follow the pattern `127.0.0.<N>:7777`; NRF is at `127.0.0.10`, SCP at `127.0.0.200`.
+
+## Environment
+
+- **Host**: Ubuntu 24.04 Noble, ARM64 (aarch64), Apple M1 VM
+- **MongoDB**: 8.0, running via systemd (`sudo systemctl start mongod`)
+- **TUN devices**: Not persistent across reboots — run before testing:
+sudo ./misc/netconf.sh
+sudo ip tuntap add name ogstun2 mode tun && sudo ip link set ogstun2 up
+sudo ip tuntap add name ogstun3 mode tun && sudo ip link set ogstun3 up
+- **GitHub remote**: `git@github.com:edmiand/open5gs.git`
+- **Upstream**: `git@github.com:open5gs/open5gs.git`
