@@ -138,6 +138,24 @@ Single collection: `subscribers`. All DBI functions take a SUPI string and query
 
 Integration tests use `build/configs/sample.yaml` (generated at configure time). NFs are selectively disabled with `global.parameter.no_<nf>: true`. The test PLMN is MCC=999, MNC=70. NF loopback addresses follow the pattern `127.0.0.<N>:7777`; NRF is at `127.0.0.10`, SCP at `127.0.0.200`.
 
+## Operations
+
+`open5gs-ctl.sh` manages all 5GC NFs and the WebUI as daemons (prefix install at `./install/`).
+
+```bash
+./open5gs-ctl.sh start              # start all NFs + WebUI in dependency order
+./open5gs-ctl.sh stop               # stop all in reverse order
+./open5gs-ctl.sh restart [nf ...]   # stop then start (all or specific)
+./open5gs-ctl.sh status             # show pid and uptime for each NF
+./open5gs-ctl.sh start upf          # start a single NF
+```
+
+NF startup order: `nrf scp amf smf upf ausf udm pcf nssf bsf udr webui`
+
+- UPF requires root — the script handles this via `sudo sh -c` so the log redirect also runs as root
+- Startup logs go to `install/var/log/open5gs/<nf>.log` (not the terminal)
+- WebUI runs on port 9999 via `npm run dev`; pidfile at `install/var/run/open5gs/webui.pid`
+
 ## Environment
 
 - **Host**: Ubuntu 24.04 Noble, ARM64 (aarch64), Apple M1 VM
