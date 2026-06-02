@@ -148,7 +148,7 @@ start_one() {
 
     mkdir -p "$RUNDIR" "$LOGDIR"
     if needs_root "$nf"; then
-        sudo "$bin" -D >> "$LOGDIR/${nf}.log" 2>&1
+        sudo sh -c "\"$bin\" -D >> \"$LOGDIR/${nf}.log\" 2>&1"
     else
         "$bin" -D >> "$LOGDIR/${nf}.log" 2>&1
     fi
