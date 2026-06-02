@@ -7,3 +7,5 @@ subprojects/prometheus-client-c
 subprojects/usrsctp
 
 webui/.next
+webui/.env
+webui/node_modules
