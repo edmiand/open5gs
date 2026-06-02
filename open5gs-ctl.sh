@@ -146,11 +146,11 @@ start_one() {
         echo "  $nf: ERROR — binary not found: $bin"; return 1
     fi
 
-    mkdir -p "$RUNDIR"
+    mkdir -p "$RUNDIR" "$LOGDIR"
     if needs_root "$nf"; then
-        sudo "$bin" -D
+        sudo "$bin" -D >> "$LOGDIR/${nf}.log" 2>&1
     else
-        "$bin" -D
+        "$bin" -D >> "$LOGDIR/${nf}.log" 2>&1
     fi
     sleep 1.5
 
