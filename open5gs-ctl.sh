@@ -196,7 +196,8 @@ dispatch_start() { if [[ $1 == webui ]]; then webui_start; else start_one "$1"; 
 dispatch_stop()  { if [[ $1 == webui ]]; then webui_stop;  else stop_one  "$1"; fi; }
 
 do_start() {
-    local -a targets=("${@:-${NFS_5GC[@]} webui}")
+    local -a targets
+    if [[ $# -gt 0 ]]; then targets=("$@"); else targets=("${NFS_5GC[@]}" webui); fi
     mkdir -p "$RUNDIR"
     echo "Starting Open5GS 5GC..."
     local t; for t in "${targets[@]}"; do dispatch_start "$t"; done
@@ -220,7 +221,8 @@ do_stop() {
 }
 
 do_restart() {
-    local -a targets=("${@:-${NFS_5GC[@]} webui}")
+    local -a targets
+    if [[ $# -gt 0 ]]; then targets=("$@"); else targets=("${NFS_5GC[@]}" webui); fi
     echo "Restarting Open5GS 5GC..."
     local -a rev=()
     local i; for (( i=${#targets[@]}-1; i>=0; i-- )); do rev+=("${targets[$i]}"); done
@@ -232,7 +234,8 @@ do_restart() {
 }
 
 do_status() {
-    local -a targets=("${@:-${NFS_5GC[@]} webui}")
+    local -a targets
+    if [[ $# -gt 0 ]]; then targets=("$@"); else targets=("${NFS_5GC[@]}" webui); fi
     printf "\n%-8s %-10s %-8s %s\n" "NF" "STATUS" "PID" "UPTIME"
     printf "%-8s %-10s %-8s %s\n"   "--------" "----------" "--------" "-------"
     local t
