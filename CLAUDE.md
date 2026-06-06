@@ -1,168 +1,193 @@
-# CLAUDE.md
+# Claude Code Prompt — Deploy Open5GS (edmiand fork) on a New arm64 Ubuntu VM
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+---
 
-## Build
+## Context
+
+Deploy a 5G Core Network using the Open5GS source fork at
+`https://github.com/edmiand/open5gs` on a fresh **arm64 Ubuntu 22.04 (Jammy)**
+VM. Follow the official build-from-source procedure at
+`https://open5gs.org/open5gs/docs/guide/02-building-open5gs-from-sources/`,
+but substitute the upstream repo with the fork. Install into `~/open5gs/install`
+so the directory structure matches our existing lab VM.
+
+Target 5G Core configuration:
+- **PLMN:** MCC `999`, MNC `70`
+- **TAC:** `1`
+- **NSSAI SST:** `1`
+- **AMF NGAP address:** the VM's primary non-loopback IP (auto-detect it)
+- **UPF GTP-U address:** same as the AMF NGAP address (single-NIC setup)
+- **TUN interface:** `ogstun`, subnet `10.45.0.1/16` + `2001:db8:cafe::1/48`
+
+---
+
+## What to Do
+
+### 1. Prerequisites check
+
+Verify the OS is Ubuntu 22.04 arm64. Print `lsb_release -a` and `uname -m`.
+Fail early with a clear message if the OS or architecture does not match.
+
+### 2. MongoDB 8.0
+
+Install MongoDB 8.0 following the official procedure for Ubuntu 22.04 (Jammy),
+including the `arm64` repo line:
+
+```
+deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ]
+    https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/8.0 multiverse
+```
+
+Start and enable `mongod`. Verify it is running with `systemctl is-active mongod`.
+
+### 3. Build dependencies
+
+Install all packages listed in the official guide:
+
+```
+python3-pip python3-setuptools python3-wheel ninja-build build-essential
+flex bison git cmake libsctp-dev libgnutls28-dev libgcrypt-dev libssl-dev
+libmongoc-dev libbson-dev libyaml-dev libnghttp2-dev libmicrohttpd-dev
+libcurl4-gnutls-dev libtins-dev libtalloc-dev meson
+```
+
+Then handle the `libidn-dev` / `libidn11-dev` conditional exactly as the
+official guide specifies (check `apt-cache show libidn-dev` first).
+
+### 4. Clone the fork
 
 ```bash
-# Configure (first time only)
-meson build --prefix=`pwd`/install
-
-# Build — use -j2 on constrained VMs (ARM64/low-RAM) to avoid OOM
-ninja -C build -j2
-
-# Install to ./install/
-ninja -C build install
+cd ~
+git clone https://github.com/edmiand/open5gs
+cd open5gs
 ```
 
-The build system is **meson + ninja**. `build/` holds all build artifacts; `install/` holds the installed tree (`bin/`, `lib/`, `etc/`). Both are gitignored.
+Install the directory as `~/open5gs` (the clone already creates this).
 
-## Testing
-
-### Prerequisites for integration tests
-MongoDB must be running and TUN devices must exist:
-```bash
-# TUN devices are not persistent across reboots
-sudo ip tuntap add name ogstun2 mode tun
-sudo ip tuntap add name ogstun3 mode tun
-sudo ./misc/netconf.sh
-sudo ip link set ogstun2 up && sudo ip link set ogstun3 up
-```
-
-### Run tests
+### 5. Build and install
 
 ```bash
-# Unit tests (no NFs spawned, fast)
-./build/tests/core/core
-./build/tests/crypt/crypt
-./build/tests/unit/unit
-
-# Integration tests (spawn real NF child processes)
-./build/tests/registration/registration    # 5G NAS registration scenarios
-./build/tests/handover/handover
-./build/tests/attach/attach                # 4G EPC attach
-
-# By suite via meson
-meson test -C build --suite open5gs:unit   # unit tests only
-meson test -C build --suite open5gs:5gc    # 5G integration tests
-meson test -C build --suite open5gs:epc    # 4G EPC integration tests
-
-# Run specific test cases within a suite (positional args filter by case name)
-./build/tests/registration/registration simple-test guti-test
+meson build --prefix=$(pwd)/install
+ninja -C build
 ```
 
-### Integration test pitfall
-Integration tests spawn NF daemons as child processes. If a test crashes, those processes stay alive and hold their ports. The next run will fail with `Address already in use`. Fix:
-```bash
-pkill -f "open5gs-"
-```
-
-## Code Architecture
-
-### Repository layout
-
-- `src/` — one subdirectory per NF, each produces one binary (`open5gs-<nf>d`)
-- `lib/` — shared protocol and infrastructure libraries (linked by NFs)
-- `tests/` — integration test suites; each spawns NFs against `build/configs/sample.yaml`
-- `configs/` — YAML config templates (copied into `build/configs/` at configure time)
-- `subprojects/` — vendored: `freeDiameter` (Diameter stack), `prometheus-client-c`
-- `misc/` — helper scripts: `netconf.sh` (TUN), `db_init.sh` (MongoDB seed), TLS cert gen
-
-### Every NF has the same internal structure
-
-```
-src/<nf>/
-  app.c          — NF entry: calls <nf>_initialize() / <nf>_terminate()
-  init.c         — initialize(): starts FSM thread, registers with NRF, opens sockets
-  context.c/h    — NF-global state (singleton context) + UE/session context structs
-  event.c/h      — event type enum + event struct definition
-  timer.c/h      — timer IDs and timer callback dispatch
-  <nf>-sm.c      — top-level FSM (amf_state_operational, etc.)
-  gmm-sm.c       — (AMF only) per-UE GMM state machine
-  n<peer>-build.c    — builds outbound SBI HTTP requests to <peer>
-  n<peer>-handler.c  — handles inbound SBI responses/notifications from <peer>
-  <proto>-handler.c  — handles inbound NGAP / NAS / PFCP / GTP messages
-  <proto>-build.c    — builds outbound NGAP / NAS / PFCP / GTP messages
-  sbi-path.c         — NRF discovery + dispatches all outbound SBI calls
-```
-
-### Event-driven / FSM execution model
-
-All NFs are single-threaded event loops. External messages (NGAP from gNB, NAS from UE, SBI responses from peer NFs) are decoded, wrapped in `<nf>_event_t`, and posted to an `ogs_queue_t`. The FSM thread dequeues events and dispatches them to the current state handler. State transitions use `OGS_FSM_TRAN(s, &next_state)`.
-
-### SBI (Service-Based Interface) pattern
-
-All 5G inter-NF communication uses HTTP/2 REST via `lib/sbi/`. The pattern for any outbound call:
-
-1. `n<peer>-build.c` — `amf_n<peer>_<service>_build_<operation>()` constructs the `ogs_sbi_request_t`
-2. `sbi-path.c` — `amf_ue_sbi_discover_and_send()` resolves the target NF instance via NRF, wraps in a transaction (`ogs_sbi_xact_t`), and sends
-3. `n<peer>-handler.c` — `amf_n<peer>_<service>_handle_<operation>()` processes the response
-
-NRF discovery is transparent — `ogs_sbi_discover_and_send()` in `lib/sbi/` handles it. Direct SCP routing is configured via `sbi.client.scp` in the NF's YAML.
-
-### Key shared libraries
-
-| Library | What it provides |
-|---------|-----------------|
-| `lib/core` | Foundation: memory (`ogs_pool_*`), logging (`ogs_log_*`), FSM (`ogs_fsm_*`), sockets, timers, queues, hash tables |
-| `lib/sbi` | HTTP/2 client/server, NRF discovery, SBI message codec, openapi stubs |
-| `lib/ngap` | NGAP ASN.1 codec (gNB↔AMF) |
-| `lib/nas` | NAS 5GS/EPS codec (UE↔AMF/MME) |
-| `lib/pfcp` | PFCP codec (SMF↔UPF) |
-| `lib/gtp` | GTPv1/v2 codec |
-| `lib/diameter` | Diameter stacks for 4G: S6a, Gx, Gy, S6b (via freeDiameter subproject) |
-| `lib/crypt` | MILENAGE, AES, KDF (5G key derivation) |
-| `lib/dbi` | MongoDB abstraction — one collection: `subscribers` |
-| `lib/app` | YAML config parsing, application init helpers |
-
-### MongoDB (`lib/dbi/`)
-
-Single collection: `subscribers`. All DBI functions take a SUPI string and query/mutate this collection:
-- `ogs_dbi_auth_info()` — fetches `K`, `OPc`/`OP`, `SQN` for authentication (called by AUSF)
-- `ogs_dbi_subscription_data()` — fetches allowed PLMNs, DNN, operator config
-- `ogs_dbi_session_data()` — navigates nested `slice[]→session[]→DNN` for QoS/charging rules
-- `ogs_dbi_increment_sqn()` / `ogs_dbi_update_sqn()` — SQN management after auth
-
-### Error handling conventions
-
-- `ogs_assert(x)` — for internal preconditions that must never fail (crashes on failure, not a recoverable error path)
-- `ogs_expect(x)` — like assert but logs and continues
-- `OGS_OK` / `OGS_ERROR` — return values for fallible functions
-- In protocol handlers receiving network input: log the error and `return`/send a reject message — do not assert on external data
-
-### Coding style
-
-4-space indentation, LF line endings (enforced by `.editorconfig`). No clang-format file; match the surrounding code style. License header required on all new `.c`/`.h` files (AGPL v3).
-
-### Test config
-
-Integration tests use `build/configs/sample.yaml` (generated at configure time). NFs are selectively disabled with `global.parameter.no_<nf>: true`. The test PLMN is MCC=999, MNC=70. NF loopback addresses follow the pattern `127.0.0.<N>:7777`; NRF is at `127.0.0.10`, SCP at `127.0.0.200`.
-
-## Operations
-
-`open5gs-ctl.sh` manages all 5GC NFs and the WebUI as daemons (prefix install at `./install/`).
+Run only the 5G Core registration test to verify the build:
 
 ```bash
-./open5gs-ctl.sh start              # start all NFs + WebUI in dependency order
-./open5gs-ctl.sh stop               # stop all in reverse order
-./open5gs-ctl.sh restart [nf ...]   # stop then start (all or specific)
-./open5gs-ctl.sh status             # show pid and uptime for each NF
-./open5gs-ctl.sh start upf          # start a single NF
+./build/tests/registration/registration
 ```
 
-NF startup order: `nrf scp amf smf upf ausf udm pcf nssf bsf udr webui`
+Then install:
 
-- UPF requires root — the script handles this via `sudo sh -c` so the log redirect also runs as root
-- Startup logs go to `install/var/log/open5gs/<nf>.log` (not the terminal)
-- WebUI runs on port 9999 via `npm run dev`; pidfile at `install/var/run/open5gs/webui.pid`
+```bash
+cd build && ninja install && cd ..
+```
 
-## Environment
+### 6. Configure for lab PLMN and correct IP addresses
 
-- **Host**: Ubuntu 24.04 Noble, ARM64 (aarch64), Apple M1 VM
-- **MongoDB**: 8.0, running via systemd (`sudo systemctl start mongod`)
-- **TUN devices**: Not persistent across reboots — run before testing:
-sudo ./misc/netconf.sh
-sudo ip tuntap add name ogstun2 mode tun && sudo ip link set ogstun2 up
-sudo ip tuntap add name ogstun3 mode tun && sudo ip link set ogstun3 up
-- **GitHub remote**: `git@github.com:edmiand/open5gs.git`
-- **Upstream**: `git@github.com:open5gs/open5gs.git`
+Auto-detect the VM's primary non-loopback IP:
+
+```bash
+VM_IP=$(ip route get 1.1.1.1 | awk '{print $7; exit}')
+```
+
+Edit the installed YAML configs in `~/open5gs/install/etc/open5gs/` using
+`sed` or Python — **do not use a text editor interactively**. Apply these
+changes programmatically:
+
+#### `nrf.yaml`
+- Set `mcc: 999`, `mnc: 70` under `nrf.serving[0].plmn_id`
+
+#### `amf.yaml`
+- Set `mcc: 999`, `mnc: 70` in **all three** `plmn_id` blocks
+  (guami, tai, plmn_support)
+- Set `tac: 1`
+- Set AMF NGAP server `address: $VM_IP`
+- Confirm `s_nssai` has `sst: 1`
+
+#### `upf.yaml`
+- Set UPF GTP-U server `address: $VM_IP`
+
+Leave all other NF configs at their defaults (127.0.x.x addresses are fine
+for intra-host SBI communication).
+
+After editing, print a diff of each changed file so changes are visible.
+
+### 7. TUN device (persistent via systemd-networkd or rc.local)
+
+Create a startup script at `/usr/local/bin/open5gs-netconf.sh`:
+
+```bash
+#!/bin/bash
+ip tuntap add name ogstun mode tun 2>/dev/null || true
+ip addr add 10.45.0.1/16 dev ogstun 2>/dev/null || true
+ip addr add 2001:db8:cafe::1/48 dev ogstun 2>/dev/null || true
+ip link set ogstun up
+sysctl -w net.ipv4.ip_forward=1
+sysctl -w net.ipv6.conf.all.forwarding=1
+iptables -t nat -C POSTROUTING -s 10.45.0.0/16 ! -o ogstun -j MASQUERADE 2>/dev/null \
+  || iptables -t nat -A POSTROUTING -s 10.45.0.0/16 ! -o ogstun -j MASQUERADE
+ip6tables -t nat -C POSTROUTING -s 2001:db8:cafe::/48 ! -o ogstun -j MASQUERADE 2>/dev/null \
+  || ip6tables -t nat -A POSTROUTING -s 2001:db8:cafe::/48 ! -o ogstun -j MASQUERADE
+```
+
+Make it executable. Create a systemd unit
+`/etc/systemd/system/open5gs-netconf.service` that runs this script at boot
+(`After=network.target`, `RemainAfterExit=yes`). Enable and start the unit.
+Verify `ogstun` is up with `ip addr show ogstun`.
+
+Disable UFW if it is active (`sudo ufw disable`).
+
+### 8. WebUI
+
+Install Node.js 20 via the Nodesource method (the official guide procedure —
+import GPG key, add nodistro repo, `apt install nodejs`).
+
+Then:
+
+```bash
+cd ~/open5gs/webui
+npm ci
+```
+
+Create a systemd unit `/etc/systemd/system/open5gs-webui.service` that runs
+`npm run dev` in `~/open5gs/webui` with `PORT=9999` and `HOSTNAME=0.0.0.0`,
+as the current user. Enable but **do not start** it yet (leave start to the
+operator so it doesn't conflict with demo sessions).
+
+### 9. Convenience: NF start/stop helper script
+
+Create `~/open5gs/start-5gc.sh` that starts the 5G Core NFs in the correct
+order (matching the NRF → SCP → AMF → SMF → UPF → AUSF → UDM → PCF → NSSF
+→ BSF → UDR sequence), each as a background process writing to its standard
+log path `~/open5gs/install/var/log/open5gs/<nf>.log`. Include a `stop` mode
+that `pkill`s all `open5gs-*d` processes.
+
+Also create `~/open5gs/status-5gc.sh` that checks whether each NF process is
+running and prints a one-line summary (running / stopped) for each.
+
+### 10. Smoke test
+
+After setup, run the following checks and print PASS/FAIL for each:
+
+1. `mongod` is active
+2. `ogstun` interface exists and has `10.45.0.1/16` assigned
+3. `~/open5gs/install/bin/open5gs-amfd --help` exits 0
+4. AMF YAML contains the detected `$VM_IP` as the NGAP address
+5. NRF YAML contains `mcc: 999` and `mnc: 70`
+
+---
+
+## Constraints and Notes
+
+- All file edits must be **non-interactive** (no `vi`, `nano`, etc.).
+- Do not modify source files in `~/open5gs/` after the build — only touch
+  `install/etc/open5gs/*.yaml`.
+- Use `sudo` only where required (package installs, sysctl, iptables,
+  systemd unit operations, tun device setup).
+- If any step fails, print the error clearly and stop — do not silently
+  continue past failures.
+- The `~/open5gs/install/` prefix must be used for all paths (not
+  `/usr/local` or system-wide install), consistent with the existing lab VMs.
+- This is a **5G Core only** deployment — skip all 4G EPC NFs (MME, SGW-C,
+  SGW-U, HSS, PCRF).
