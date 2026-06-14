@@ -200,6 +200,7 @@ do_start() {
     if [[ $# -gt 0 ]]; then targets=("$@"); else targets=("${NFS_5GC[@]}" webui); fi
     mkdir -p "$RUNDIR"
     echo "Starting Open5GS 5GC..."
+    "$SCRIPT_DIR/clear-logs.sh"
     local t; for t in "${targets[@]}"; do dispatch_start "$t"; done
     echo "Done."
 }
