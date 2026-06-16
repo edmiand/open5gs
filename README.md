@@ -140,8 +140,7 @@ with `PORT=9999 HOSTNAME=0.0.0.0`. Enable but **do not start** yet.
 
 ### Step 8 — Helper scripts
 
-- `~/open5gs/start-5gc.sh` — starts NFs in order: NRF → SCP → AMF → SMF → UPF → AUSF → UDM → PCF → NSSF → BSF → UDR; each logs to `install/var/log/open5gs/<nf>.log`. Also accepts `stop` to `pkill open5gs-*d`.
-- `~/open5gs/status-5gc.sh` — prints running/stopped for each NF.
+- `~/open5gs/open5gs-ctl.sh {start|stop|restart|status} [nf ...]` — manages NFs in order: NRF → SCP → AMF → SMF → UPF → AUSF → UDM → PCF → NSSF → BSF → UDR, plus the WebUI. Each NF logs to `install/var/log/open5gs/<nf>.log`.
 
 ### Step 9 — Smoke test
 
