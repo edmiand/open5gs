@@ -200,9 +200,27 @@ do_start() {
     if [[ $# -gt 0 ]]; then targets=("$@"); else targets=("${NFS_5GC[@]}" webui); fi
     mkdir -p "$RUNDIR"
     echo "Starting Open5GS 5GC..."
-    "$SCRIPT_DIR/clear-logs.sh"
     local t; for t in "${targets[@]}"; do dispatch_start "$t"; done
     echo "Done."
+}
+
+do_clear_logs() {
+    local f size_kb total_freed=0
+    echo "Clearing Open5GS logs in $LOGDIR ..."
+    echo ""
+    for f in "$LOGDIR"/*.log; do
+        [[ -f $f ]] || continue
+        size_kb=$(du -k "$f" | cut -f1)
+        if [[ $(stat -c '%U' "$f") == "root" ]]; then
+            sudo truncate -s 0 "$f"
+        else
+            truncate -s 0 "$f"
+        fi
+        printf "  cleared %-16s (%d KB freed)\n" "$(basename "$f")" "$size_kb"
+        total_freed=$(( total_freed + size_kb ))
+    done
+    echo ""
+    printf "Done. Total freed: %d KB\n" "$total_freed"
 }
 
 do_stop() {
@@ -261,12 +279,13 @@ do_status() {
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") {start|stop|restart|status} [nf ...]
+Usage: $(basename "$0") {start|stop|restart|status|clear-logs} [nf ...]
 
-  start   [nf ...]   Start all 5GC NFs (or specific ones), in order
-  stop    [nf ...]   Stop all 5GC NFs in reverse order (or specific ones)
-  restart [nf ...]   Stop then start (all or specific NFs)
-  status  [nf ...]   Show running status
+  start       [nf ...]   Start all 5GC NFs (or specific ones), in order
+  stop        [nf ...]   Stop all 5GC NFs in reverse order (or specific ones)
+  restart     [nf ...]   Stop then start (all or specific NFs)
+  status      [nf ...]   Show running status
+  clear-logs              Truncate all NF log files in-place
 
 NF order: ${NFS_5GC[*]} webui
 
@@ -276,6 +295,7 @@ Examples:
   $(basename "$0") restart upf
   $(basename "$0") restart webui
   $(basename "$0") status
+  $(basename "$0") clear-logs
 EOF
     exit 1
 }
@@ -289,5 +309,6 @@ case $CMD in
     stop)    do_stop    "$@" ;;
     restart) do_restart "$@" ;;
     status)  do_status  "$@" ;;
+    clear-logs) do_clear_logs ;;
     *)       usage ;;
 esac
