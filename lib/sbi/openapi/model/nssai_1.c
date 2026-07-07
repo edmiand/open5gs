@@ -270,6 +270,10 @@ OpenAPI_nssai_1_t *OpenAPI_nssai_1_parseFromJSON(cJSON *nssai_1JSON)
                     ogs_error("OpenAPI_nssai_1_parseFromJSON() failed [inner]");
                     goto end;
                 }
+                if (localMapKeyPair == NULL) {
+                    ogs_error("OpenAPI_nssai_1_parseFromJSON() failed [additional_snssai_data]");
+                    goto end;
+                }
                 OpenAPI_list_add(additional_snssai_dataList, localMapKeyPair);
             }
         }
@@ -311,7 +315,7 @@ end:
     }
     if (additional_snssai_dataList) {
         OpenAPI_list_for_each(additional_snssai_dataList, node) {
-            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*) node->data;
+            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*)node->data;
             ogs_free(localKeyValue->key);
             OpenAPI_additional_snssai_data_1_free(localKeyValue->value);
             OpenAPI_map_free(localKeyValue);

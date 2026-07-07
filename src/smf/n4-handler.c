@@ -428,7 +428,7 @@ void smf_5gc_n4_handle_session_modification_response(
                 sess->nsmf_param.rat_type = sess->sbi_rat_type;
 
                 r = smf_sbi_discover_and_send(
-                        OGS_SBI_SERVICE_TYPE_NSMF_PDUSESSION, NULL,
+                        OpenAPI_service_name_nsmf_pdusession, NULL,
                         smf_nsmf_pdusession_build_hsmf_update_data,
                         sess, stream,
                         flags & OGS_PFCP_MODIFY_XN_HANDOVER ?
@@ -484,7 +484,7 @@ void smf_5gc_n4_handle_session_modification_response(
                     sess->nsmf_param.rat_type = sess->sbi_rat_type;
 
                     r = smf_sbi_discover_and_send(
-                            OGS_SBI_SERVICE_TYPE_NSMF_PDUSESSION, NULL,
+                            OpenAPI_service_name_nsmf_pdusession, NULL,
                             smf_nsmf_pdusession_build_hsmf_update_data,
                             sess, stream,
                             flags & OGS_PFCP_MODIFY_FROM_ACTIVATING ?
@@ -621,7 +621,7 @@ void smf_5gc_n4_handle_session_modification_response(
                         OpenAPI_request_indication_UE_REQ_PDU_SES_REL;
 
                     r = smf_sbi_discover_and_send(
-                            OGS_SBI_SERVICE_TYPE_NSMF_PDUSESSION, NULL,
+                            OpenAPI_service_name_nsmf_pdusession, NULL,
                             smf_nsmf_pdusession_build_hsmf_update_data,
                             sess, stream, trigger, NULL);
                     ogs_expect(r == OGS_OK);
@@ -654,7 +654,7 @@ void smf_5gc_n4_handle_session_modification_response(
                         OpenAPI_request_indication_NW_REQ_PDU_SES_REL;
 
                     r = smf_sbi_discover_and_send(
-                            OGS_SBI_SERVICE_TYPE_NSMF_PDUSESSION, NULL,
+                            OpenAPI_service_name_nsmf_pdusession, NULL,
                             smf_nsmf_pdusession_build_hsmf_update_data,
                             sess, stream, trigger, NULL);
                     ogs_expect(r == OGS_OK);
@@ -684,7 +684,7 @@ void smf_5gc_n4_handle_session_modification_response(
      * 16. V: OGS_FSM_TRAN(s, smf_gsm_state_session_will_release);
      */
                     r = smf_sbi_discover_and_send(
-                            OGS_SBI_SERVICE_TYPE_NSMF_PDUSESSION, NULL,
+                            OpenAPI_service_name_nsmf_pdusession, NULL,
                             smf_nsmf_pdusession_build_release_data,
                             sess, stream, trigger, NULL);
                     ogs_expect(r == OGS_OK);
@@ -764,7 +764,7 @@ void smf_5gc_n4_handle_session_modification_response(
             }
 
             r = smf_sbi_discover_and_send(
-                    OGS_SBI_SERVICE_TYPE_NSMF_PDUSESSION, NULL,
+                    OpenAPI_service_name_nsmf_pdusession, NULL,
                     smf_nsmf_pdusession_build_vsmf_update_data,
                     sess, NULL, state, NULL);
             ogs_expect(r == OGS_OK);
@@ -816,7 +816,7 @@ void smf_5gc_n4_handle_session_modification_response(
                         sess, stream, OpenAPI_up_cnx_state_ACTIVATED);
             } else {
                 r = smf_sbi_discover_and_send(
-                        OGS_SBI_SERVICE_TYPE_NUDM_UECM, NULL,
+                        OpenAPI_service_name_nudm_uecm, NULL,
                         smf_nudm_uecm_build_registration,
                         sess, stream, SMF_UECM_STATE_REGISTERED, NULL);
                 ogs_expect(r == OGS_OK);
@@ -1796,11 +1796,50 @@ uint8_t smf_n4_handle_session_report_request(
     /* Error Indication is handled last */
     if (report_type.error_indication_report && far) {
         if (sess->epc == true) {
-            ogs_error("[%s:%s] Error Indication from SGW-C",
-                smf_ue->imsi_bcd, sess->session.name);
-            ogs_assert(OGS_OK ==
-                smf_epc_pfcp_send_session_deletion_request(
-                    sess, OGS_INVALID_POOL_ID));
+            /*
+             * 3GPP TS 23.007 (GTP-U Error Indication at the PGW):
+             *  - default bearer   -> deactivate all bearers of the PDN
+             *                        connection (the PDN connection is released).
+             *  - dedicated bearer -> deactivate only that bearer.
+             *
+             * The Error Indication Report identifies the broken GTP-U tunnel
+             * through the remote F-TEID carried in the downlink FAR. Running a
+             * PGW-initiated bearer deactivation makes the PFCP modification
+             * response send a Delete Bearer Request to the SGW-C/MME, so the
+             * MME deactivates the EPS bearer towards the UE (NAS Deactivate
+             * EPS Bearer Context Request).
+             *
+             * Deleting the PFCP session locally (as before) never notified the
+             * MME, so the UE kept a stale PDN connection: data on other APNs
+             * still worked, but the UE could not originate a new VoLTE call
+             * until it re-attached (airplane-mode toggle).
+             */
+            ogs_list_for_each(&sess->bearer_list, bearer) {
+                if (bearer->dl_far == far)
+                    break;
+            }
+            if (!bearer) {
+                ogs_error("[%s:%s] Error Indication from SGW-U: "
+                        "no bearer found for FAR",
+                    smf_ue->imsi_bcd, sess->session.name);
+            } else if (bearer == smf_default_bearer_in_sess(sess)) {
+                ogs_error("[%s:%s] Error Indication from SGW-U "
+                        "[EBI:%d] (default bearer)",
+                    smf_ue->imsi_bcd, sess->session.name, bearer->ebi);
+                ogs_assert(OGS_OK ==
+                    smf_epc_pfcp_send_deactivation(
+                        sess, OGS_GTP2_CAUSE_REACTIVATION_REQUESTED));
+            } else {
+                ogs_error("[%s:%s] Error Indication from SGW-U "
+                        "[EBI:%d] (dedicated bearer)",
+                    smf_ue->imsi_bcd, sess->session.name, bearer->ebi);
+                ogs_assert(OGS_OK ==
+                    smf_epc_pfcp_send_one_bearer_modification_request(
+                        bearer, OGS_INVALID_POOL_ID,
+                        OGS_PFCP_MODIFY_DL_ONLY|OGS_PFCP_MODIFY_DEACTIVATE,
+                        OGS_NAS_PROCEDURE_TRANSACTION_IDENTITY_UNASSIGNED,
+                        OGS_GTP2_CAUSE_UNDEFINED_VALUE));
+            }
         } else {
             ogs_warn("[%s:%s] Error Indication from gNB",
                 smf_ue->supi, sess->session.name);

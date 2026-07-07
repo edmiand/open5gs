@@ -458,7 +458,7 @@ typedef struct ogs_sbi_discovery_option_s {
     char *requester_nf_instance_id;
 
     int num_of_service_names;
-    char *service_names[OGS_SBI_MAX_NUM_OF_SERVICE_TYPE];
+    OpenAPI_service_name_e service_names[OGS_SBI_MAX_NUM_OF_SERVICE_NAME];
 
     int num_of_snssais;
     ogs_s_nssai_t snssais[OGS_MAX_NUM_OF_SLICE];
@@ -600,6 +600,7 @@ typedef struct ogs_sbi_message_s {
     OpenAPI_app_session_context_t *AppSessionContext;
     OpenAPI_app_session_context_update_data_patch_t
         *AppSessionContextUpdateDataPatch;
+    OpenAPI_termination_info_t *TerminationInfo;
     OpenAPI_sm_policy_notification_t *SmPolicyNotification;
     OpenAPI_termination_notification_t *TerminationNotification;
     OpenAPI_deregistration_data_t *DeregistrationData;
@@ -697,7 +698,7 @@ void ogs_sbi_discovery_option_set_dnn(
 
 void ogs_sbi_discovery_option_add_service_names(
         ogs_sbi_discovery_option_t *discovery_option,
-        char *service_name);
+        OpenAPI_service_name_e service_name);
 char *ogs_sbi_discovery_option_build_service_names(
         ogs_sbi_discovery_option_t *discovery_option);
 int ogs_sbi_discovery_option_parse_service_names(

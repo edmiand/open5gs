@@ -69,6 +69,7 @@ void amf_state_operational(ogs_fsm_t *s, amf_event_t *e)
     ogs_pool_id_t sbi_xact_id = OGS_INVALID_POOL_ID;
     int state = AMF_CREATE_SM_CONTEXT_NO_STATE;
     ogs_pool_id_t ran_ue_id = OGS_INVALID_POOL_ID;
+    ogs_pool_id_t target_ue_id = OGS_INVALID_POOL_ID;
     ogs_sbi_stream_t *stream = NULL;
     ogs_pool_id_t stream_id = OGS_INVALID_POOL_ID;
     ogs_sbi_request_t *sbi_request = NULL;
@@ -78,6 +79,7 @@ void amf_state_operational(ogs_fsm_t *s, amf_event_t *e)
     ogs_sbi_response_t *sbi_response = NULL;
     ogs_sbi_message_t sbi_message;
 
+    int service_name_id = OpenAPI_service_name_NULL;
 
     amf_sm_debug(e);
 
@@ -137,13 +139,15 @@ void amf_state_operational(ogs_fsm_t *s, amf_event_t *e)
             break;
         }
 
-        SWITCH(sbi_message.h.service.name)
-        CASE(OGS_SBI_SERVICE_NAME_NUDM_SDM)
+        service_name_id = ogs_sbi_service_name_id_from_string(
+                sbi_message.h.service.name);
+        switch (service_name_id) {
+        case OpenAPI_service_name_nudm_sdm:
             api_version = OGS_SBI_API_V2;
             break;
-        DEFAULT
+        default:
             api_version = OGS_SBI_API_V1;
-        END
+        }
 
         ogs_assert(api_version);
         if (strcmp(sbi_message.h.api.version, api_version) != 0) {
@@ -156,8 +160,8 @@ void amf_state_operational(ogs_fsm_t *s, amf_event_t *e)
             break;
         }
 
-        SWITCH(sbi_message.h.service.name)
-        CASE(OGS_SBI_SERVICE_NAME_NNRF_NFM)
+        switch (service_name_id) {
+        case OpenAPI_service_name_nnrf_nfm:
 
             SWITCH(sbi_message.h.resource.component[0])
             CASE(OGS_SBI_RESOURCE_NAME_NF_STATUS_NOTIFY)
@@ -186,7 +190,7 @@ void amf_state_operational(ogs_fsm_t *s, amf_event_t *e)
             END
             break;
 
-        CASE(OGS_SBI_SERVICE_NAME_NAMF_COMM)
+        case OpenAPI_service_name_namf_comm:
             SWITCH(sbi_message.h.resource.component[0])
             CASE(OGS_SBI_RESOURCE_NAME_UE_CONTEXTS)
                 SWITCH(sbi_message.h.resource.component[2])
@@ -271,7 +275,7 @@ void amf_state_operational(ogs_fsm_t *s, amf_event_t *e)
             END
             break;
 
-        CASE(OGS_SBI_SERVICE_NAME_NAMF_CALLBACK)
+        case OGS_SBI_SERVICE_NAME_ID_NAMF_CALLBACK:
             SWITCH(sbi_message.h.resource.component[1])
             CASE(OGS_SBI_RESOURCE_NAME_SM_CONTEXT_STATUS)
                 amf_namf_callback_handle_sm_context_status(
@@ -302,14 +306,14 @@ void amf_state_operational(ogs_fsm_t *s, amf_event_t *e)
             END
             break;
 
-        DEFAULT
+        default:
             ogs_error("Invalid API name [%s]", sbi_message.h.service.name);
             ogs_assert(true ==
                 ogs_sbi_server_send_error(stream,
                     OGS_SBI_HTTP_STATUS_BAD_REQUEST, &sbi_message,
                     "Invalid API name", sbi_message.h.resource.component[0],
                     NULL));
-        END
+        }
 
         /* In lib/sbi/server.c, notify_completed() releases 'request' buffer. */
         ogs_sbi_message_free(&sbi_message);
@@ -328,14 +332,16 @@ void amf_state_operational(ogs_fsm_t *s, amf_event_t *e)
             break;
         }
 
-        SWITCH(sbi_message.h.service.name)
-        CASE(OGS_SBI_SERVICE_NAME_NUDM_SDM)
-        CASE(OGS_SBI_SERVICE_NAME_NNSSF_NSSELECTION)
+        service_name_id = ogs_sbi_service_name_id_from_string(
+                sbi_message.h.service.name);
+        switch (service_name_id) {
+        case OpenAPI_service_name_nudm_sdm:
+        case OpenAPI_service_name_nnssf_nsselection:
             api_version = OGS_SBI_API_V2;
             break;
-        DEFAULT
+        default:
             api_version = OGS_SBI_API_V1;
-        END
+        }
 
         ogs_assert(api_version);
         if (strcmp(sbi_message.h.api.version, api_version) != 0) {
@@ -345,8 +351,8 @@ void amf_state_operational(ogs_fsm_t *s, amf_event_t *e)
             break;
         }
 
-        SWITCH(sbi_message.h.service.name)
-        CASE(OGS_SBI_SERVICE_NAME_NNRF_NFM)
+        switch (service_name_id) {
+        case OpenAPI_service_name_nnrf_nfm:
 
             SWITCH(sbi_message.h.resource.component[0])
             CASE(OGS_SBI_RESOURCE_NAME_NF_INSTANCES)
@@ -439,7 +445,7 @@ void amf_state_operational(ogs_fsm_t *s, amf_event_t *e)
             END
             break;
 
-        CASE(OGS_SBI_SERVICE_NAME_NNRF_DISC)
+        case OpenAPI_service_name_nnrf_disc:
             SWITCH(sbi_message.h.resource.component[0])
             CASE(OGS_SBI_RESOURCE_NAME_NF_INSTANCES)
                 sbi_xact_id = OGS_POINTER_TO_UINT(e->h.sbi.data);
@@ -479,11 +485,11 @@ void amf_state_operational(ogs_fsm_t *s, amf_event_t *e)
             END
             break;
 
-        CASE(OGS_SBI_SERVICE_NAME_NAUSF_AUTH)
-        CASE(OGS_SBI_SERVICE_NAME_NUDM_UECM)
-        CASE(OGS_SBI_SERVICE_NAME_NUDM_SDM)
-        CASE(OGS_SBI_SERVICE_NAME_NPCF_AM_POLICY_CONTROL)
-        CASE(OGS_SBI_SERVICE_NAME_NAMF_COMM)
+        case OpenAPI_service_name_nausf_auth:
+        case OpenAPI_service_name_nudm_uecm:
+        case OpenAPI_service_name_nudm_sdm:
+        case OpenAPI_service_name_npcf_am_policy_control:
+        case OpenAPI_service_name_namf_comm:
             sbi_xact_id = OGS_POINTER_TO_UINT(e->h.sbi.data);
             ogs_assert(sbi_xact_id >= OGS_MIN_POOL_ID &&
                     sbi_xact_id <= OGS_MAX_POOL_ID);
@@ -520,7 +526,7 @@ void amf_state_operational(ogs_fsm_t *s, amf_event_t *e)
             ogs_fsm_dispatch(&amf_ue->sm, e);
             break;
 
-        CASE(OGS_SBI_SERVICE_NAME_NSMF_PDUSESSION)
+        case OpenAPI_service_name_nsmf_pdusession:
             sbi_xact_id = OGS_POINTER_TO_UINT(e->h.sbi.data);
             ogs_assert(sbi_xact_id >= OGS_MIN_POOL_ID &&
                     sbi_xact_id <= OGS_MAX_POOL_ID);
@@ -545,6 +551,8 @@ void amf_state_operational(ogs_fsm_t *s, amf_event_t *e)
 
                 if (ctx->ran_ue_id != OGS_INVALID_POOL_ID)
                     ran_ue_id = ctx->ran_ue_id;
+                if (ctx->target_ue_id != OGS_INVALID_POOL_ID)
+                    target_ue_id = ctx->target_ue_id;
             }
 
             ogs_sbi_xact_remove(sbi_xact);
@@ -601,7 +609,8 @@ void amf_state_operational(ogs_fsm_t *s, amf_event_t *e)
             SWITCH(sbi_message.h.resource.component[2])
             CASE(OGS_SBI_RESOURCE_NAME_MODIFY)
                 amf_nsmf_pdusession_handle_update_sm_context(
-                        amf_ue, ran_ue, sess, state, &sbi_message);
+                        amf_ue, ran_ue, sess, state, target_ue_id,
+                        &sbi_message);
                 break;
 
             CASE(OGS_SBI_RESOURCE_NAME_RELEASE)
@@ -647,7 +656,7 @@ void amf_state_operational(ogs_fsm_t *s, amf_event_t *e)
             END
             break;
 
-        CASE(OGS_SBI_SERVICE_NAME_NNSSF_NSSELECTION)
+        case OpenAPI_service_name_nnssf_nsselection:
             sbi_xact_id = OGS_POINTER_TO_UINT(e->h.sbi.data);
             ogs_assert(sbi_xact_id >= OGS_MIN_POOL_ID &&
                     sbi_xact_id <= OGS_MAX_POOL_ID);
@@ -697,10 +706,10 @@ void amf_state_operational(ogs_fsm_t *s, amf_event_t *e)
                     amf_ue, ran_ue, sess, state, &sbi_message);
             break;
 
-        DEFAULT
+        default:
             ogs_error("Invalid service name [%s]", sbi_message.h.service.name);
             ogs_assert_if_reached();
-        END
+        }
 
         ogs_sbi_message_free(&sbi_message);
         ogs_sbi_response_free(sbi_response);

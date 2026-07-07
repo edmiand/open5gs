@@ -142,6 +142,10 @@ OpenAPI_mbs_session_t *OpenAPI_mbs_session_parseFromJSON(cJSON *mbs_sessionJSON)
                     ogs_error("OpenAPI_mbs_session_parseFromJSON() failed [inner]");
                     goto end;
                 }
+                if (localMapKeyPair == NULL) {
+                    ogs_error("OpenAPI_mbs_session_parseFromJSON() failed [mbs_area_sessions]");
+                    goto end;
+                }
                 OpenAPI_list_add(mbs_area_sessionsList, localMapKeyPair);
             }
         }
@@ -160,7 +164,7 @@ end:
     }
     if (mbs_area_sessionsList) {
         OpenAPI_list_for_each(mbs_area_sessionsList, node) {
-            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*) node->data;
+            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*)node->data;
             ogs_free(localKeyValue->key);
             OpenAPI_mbs_service_area_info_free(localKeyValue->value);
             OpenAPI_map_free(localKeyValue);

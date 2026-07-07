@@ -1,4 +1,4 @@
-# Copyright (C) 2019 by Sukchan Lee <acetcom@gmail.com>
+# Copyright (C) 2019-2026 by Sukchan Lee <acetcom@gmail.com>
 
 # This file is part of Open5GS.
 
@@ -165,6 +165,9 @@ libasn1c_s1ap_sources = files('''
     S1AP_SecondaryRATDataUsageReport.c
     S1AP_UERadioCapabilityIDMappingRequest.c
     S1AP_UERadioCapabilityIDMappingResponse.c
+    S1AP_S1RemovalRequest.c
+    S1AP_S1RemovalResponse.c
+    S1AP_S1RemovalFailure.c
     S1AP_Additional-GUTI.c
     S1AP_AdditionalRRMPriorityIndex.c
     S1AP_AerialUEsubscriptionInformation.c
@@ -178,6 +181,8 @@ libasn1c_s1ap_sources = files('''
     S1AP_Bearers-SubjectToStatusTransfer-Item.c
     S1AP_Bearers-SubjectToEarlyStatusTransferList.c
     S1AP_Bearers-SubjectToEarlyStatusTransfer-Item.c
+    S1AP_Bearers-SubjectToDLDiscardingList.c
+    S1AP_Bearers-SubjectToDLDiscarding-Item.c
     S1AP_BearerType.c
     S1AP_BitRate.c
     S1AP_BluetoothMeasurementConfiguration.c
@@ -228,6 +233,8 @@ libasn1c_s1ap_sources = files('''
     S1AP_CNTypeRestrictions.c
     S1AP_CNTypeRestrictions-Item.c
     S1AP_CNType.c
+    S1AP_CoarseUELocationRequested.c
+    S1AP_CoarseUELocation.c
     S1AP_ConcurrentWarningMessageIndicator.c
     S1AP_ConnectedengNBList.c
     S1AP_ConnectedengNBItem.c
@@ -259,6 +266,7 @@ libasn1c_s1ap_sources = files('''
     S1AP_DL-Forwarding.c
     S1AP_DL-NAS-MAC.c
     S1AP_DLCOUNT-PDCP-SNlength.c
+    S1AP_DLDiscarding.c
     S1AP_Direct-Forwarding-Path-Availability.c
     S1AP_Data-Forwarding-Not-Possible.c
     S1AP_DLNASPDUDeliveryAckRequest.c
@@ -390,13 +398,17 @@ libasn1c_s1ap_sources = files('''
     S1AP_M3Configuration.c
     S1AP_M3period.c
     S1AP_M4Configuration.c
+    S1AP_M4ReportAmountMDT.c
     S1AP_M4period.c
     S1AP_M5Configuration.c
+    S1AP_M5ReportAmountMDT.c
     S1AP_M5period.c
     S1AP_M6Configuration.c
+    S1AP_M6ReportAmountMDT.c
     S1AP_M6report-Interval.c
     S1AP_M6delay-threshold.c
     S1AP_M7Configuration.c
+    S1AP_M7ReportAmountMDT.c
     S1AP_M7period.c
     S1AP_MDT-Activation.c
     S1AP_MDT-Location-Info.c
@@ -505,6 +517,7 @@ libasn1c_s1ap_sources = files('''
     S1AP_ReportAmountMDT.c
     S1AP_ReportIntervalMDT.c
     S1AP_M1ReportingTrigger.c
+    S1AP_RequestedTNLInfo.c
     S1AP_RequestType.c
     S1AP_RequestTypeAdditionalInfo.c
     S1AP_RIMTransfer.c
@@ -603,6 +616,9 @@ libasn1c_s1ap_sources = files('''
     S1AP_M1ThresholdEventA2.c
     S1AP_Threshold-RSRP.c
     S1AP_Threshold-RSRQ.c
+    S1AP_TimeBasedHandoverInformation.c
+    S1AP_HandoverWindowStart.c
+    S1AP_HandoverWindowDuration.c
     S1AP_TimeToTrigger.c
     S1AP_TimeToWait.c
     S1AP_Time-UE-StayedInCell.c
@@ -617,6 +633,7 @@ libasn1c_s1ap_sources = files('''
     S1AP_TunnelInformation.c
     S1AP_TypeOfError.c
     S1AP_TAIListForRestart.c
+    S1AP_TimeRefDistribution.c
     S1AP_UEAggregateMaximumBitrate.c
     S1AP_UEAppLayerMeasConfig.c
     S1AP_UECapabilityInfoRequest.c
@@ -683,12 +700,59 @@ libasn1c_s1ap_sources = files('''
 
 libasn1c_s1ap_inc = include_directories('.')
 
+# The generated S1AP ASN.1 code has a very large number of source
+# files. Linking all of the resulting object files in a single command can
+# exceed the system's maximum command-line length (ARG_MAX), which makes the
+# build fail with "ninja: fatal: posix_spawn: Argument list too long" on some
+# builders (e.g. Launchpad/focal).
+#
+# To avoid this, the sources are split into fixed-size groups, each built as
+# an intermediate static library, which are then combined into the final
+# shared library with link_whole. Using a fixed chunk size (rather than a
+# fixed number of chunks) keeps each archive command-line bounded even as
+# more files are added over time, while link_whole preserves every symbol in
+# the resulting library.
+
+libasn1c_s1ap_chunk_size = 400
+
+libasn1c_s1ap_static_libs = []
+libasn1c_s1ap_chunk_sources = []
+libasn1c_s1ap_chunk_index = 0
+
+foreach source : libasn1c_s1ap_sources
+    libasn1c_s1ap_chunk_sources += [source]
+
+    if libasn1c_s1ap_chunk_sources.length() == libasn1c_s1ap_chunk_size
+        libasn1c_s1ap_static_libs += [static_library(
+            'ogsasn1c-s1ap-@0@'.format(libasn1c_s1ap_chunk_index),
+            sources : libasn1c_s1ap_chunk_sources,
+            c_args : libasn1c_common_cc_flags,
+            include_directories : libasn1c_s1ap_inc,
+            dependencies : [libasn1c_common_dep, libasn1c_util_dep],
+            pic : true,
+            install : false)]
+
+        libasn1c_s1ap_chunk_sources = []
+        libasn1c_s1ap_chunk_index += 1
+    endif
+endforeach
+
+if libasn1c_s1ap_chunk_sources.length() > 0
+    libasn1c_s1ap_static_libs += [static_library(
+        'ogsasn1c-s1ap-@0@'.format(libasn1c_s1ap_chunk_index),
+        sources : libasn1c_s1ap_chunk_sources,
+        c_args : libasn1c_common_cc_flags,
+        include_directories : libasn1c_s1ap_inc,
+        dependencies : [libasn1c_common_dep, libasn1c_util_dep],
+        pic : true,
+        install : false)]
+endif
+
 libasn1c_s1ap = library('ogsasn1c-s1ap',
-    sources : libasn1c_s1ap_sources,
     version : libogslib_version,
-    c_args : libasn1c_common_cc_flags,
     include_directories : libasn1c_s1ap_inc,
     dependencies : [libasn1c_common_dep, libasn1c_util_dep],
+    link_whole : libasn1c_s1ap_static_libs,
     install : true)
 
 libasn1c_s1ap_dep = declare_dependency(

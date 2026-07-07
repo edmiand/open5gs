@@ -221,7 +221,8 @@ bool pcf_npcf_am_policy_control_handle_create(pcf_ue_am_t *pcf_ue_am,
 
         memset(&header, 0, sizeof(header));
         header.service.name =
-            (char *)OGS_SBI_SERVICE_NAME_NPCF_AM_POLICY_CONTROL;
+            OpenAPI_service_name_ToString(
+                    OpenAPI_service_name_npcf_am_policy_control);
         header.api.version = (char *)OGS_SBI_API_V1;
         header.resource.component[0] = (char *)OGS_SBI_RESOURCE_NAME_POLICIES;
         header.resource.component[1] = pcf_ue_am->association_id;
@@ -242,7 +243,7 @@ bool pcf_npcf_am_policy_control_handle_create(pcf_ue_am_t *pcf_ue_am,
         return true;
     } else {
         /* Home PLMN */
-        r = pcf_ue_am_sbi_discover_and_send(OGS_SBI_SERVICE_TYPE_NUDR_DR, NULL,
+        r = pcf_ue_am_sbi_discover_and_send(OpenAPI_service_name_nudr_dr, NULL,
                 pcf_nudr_dr_build_query_am_data, pcf_ue_am, stream, NULL);
         ogs_expect(r == OGS_OK);
         ogs_assert(r != OGS_ERROR);
@@ -555,7 +556,7 @@ bool pcf_npcf_smpolicycontrol_handle_create(pcf_sess_t *sess,
     if (ogs_sbi_supi_in_vplmn(pcf_ue_sm->supi) == true) {
         /* Visited PLMN */
         r = pcf_sess_sbi_discover_and_send(
-                    OGS_SBI_SERVICE_TYPE_NBSF_MANAGEMENT, NULL,
+                    OpenAPI_service_name_nbsf_management, NULL,
                     pcf_nbsf_management_build_register,
                     sess, stream, NULL);
         ogs_expect(r == OGS_OK);
@@ -565,7 +566,7 @@ bool pcf_npcf_smpolicycontrol_handle_create(pcf_sess_t *sess,
     } else {
         /* Home PLMN */
         r = pcf_sess_sbi_discover_and_send(
-                OGS_SBI_SERVICE_TYPE_NUDR_DR, NULL,
+                OpenAPI_service_name_nudr_dr, NULL,
                 pcf_nudr_dr_build_query_sm_data, sess, stream, NULL);
         ogs_expect(r == OGS_OK);
         ogs_assert(r != OGS_ERROR);
@@ -622,7 +623,8 @@ bool pcf_npcf_smpolicycontrol_handle_delete(pcf_sess_t *sess,
     }
 
     ogs_list_for_each(&sess->app_list, app_session) {
-        pcf_sbi_send_policyauthorization_terminate_notify(app_session);
+        pcf_sbi_send_policyauthorization_terminate_notify(app_session,
+                OpenAPI_termination_cause_PDU_SESSION_TERMINATION);
     }
 
     if (pcf_sessions_number_by_snssai_and_dnn(
@@ -631,7 +633,7 @@ bool pcf_npcf_smpolicycontrol_handle_delete(pcf_sess_t *sess,
                 ogs_sbi_send_response(stream, OGS_SBI_HTTP_STATUS_NO_CONTENT));
     } else if (sess->binding.resource_uri) {
         r = pcf_sess_sbi_discover_and_send(
-                OGS_SBI_SERVICE_TYPE_NBSF_MANAGEMENT, NULL,
+                OpenAPI_service_name_nbsf_management, NULL,
                 pcf_nbsf_management_build_de_register, sess, stream, NULL);
         ogs_expect(r == OGS_OK);
         ogs_assert(r != OGS_ERROR);
@@ -1081,7 +1083,9 @@ bool pcf_npcf_policyauthorization_handle_create(pcf_sess_t *sess,
     memset(&sendmsg, 0, sizeof(sendmsg));
 
     memset(&header, 0, sizeof(header));
-    header.service.name = (char *)OGS_SBI_SERVICE_NAME_NPCF_POLICYAUTHORIZATION;
+    header.service.name =
+        OpenAPI_service_name_ToString(
+                OpenAPI_service_name_npcf_policyauthorization);
     header.api.version = (char *)OGS_SBI_API_V1;
     header.resource.component[0] = (char *)OGS_SBI_RESOURCE_NAME_APP_SESSIONS;
     header.resource.component[1] = (char *)app_session->app_session_id;

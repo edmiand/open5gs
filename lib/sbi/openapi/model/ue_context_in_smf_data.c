@@ -156,6 +156,10 @@ OpenAPI_ue_context_in_smf_data_t *OpenAPI_ue_context_in_smf_data_parseFromJSON(c
                     ogs_error("OpenAPI_ue_context_in_smf_data_parseFromJSON() failed [inner]");
                     goto end;
                 }
+                if (localMapKeyPair == NULL) {
+                    ogs_error("OpenAPI_ue_context_in_smf_data_parseFromJSON() failed [pdu_sessions]");
+                    goto end;
+                }
                 OpenAPI_list_add(pdu_sessionsList, localMapKeyPair);
             }
         }
@@ -204,7 +208,7 @@ OpenAPI_ue_context_in_smf_data_t *OpenAPI_ue_context_in_smf_data_parseFromJSON(c
 end:
     if (pdu_sessionsList) {
         OpenAPI_list_for_each(pdu_sessionsList, node) {
-            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*) node->data;
+            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*)node->data;
             ogs_free(localKeyValue->key);
             OpenAPI_pdu_session_free(localKeyValue->value);
             OpenAPI_map_free(localKeyValue);

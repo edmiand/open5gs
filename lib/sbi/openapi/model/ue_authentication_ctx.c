@@ -185,6 +185,10 @@ OpenAPI_ue_authentication_ctx_t *OpenAPI_ue_authentication_ctx_parseFromJSON(cJS
                     ogs_error("OpenAPI_ue_authentication_ctx_parseFromJSON() failed [inner]");
                     goto end;
                 }
+                if (localMapKeyPair == NULL) {
+                    ogs_error("OpenAPI_ue_authentication_ctx_parseFromJSON() failed [_links]");
+                    goto end;
+                }
                 OpenAPI_list_add(_linksList, localMapKeyPair);
             }
         }
@@ -212,7 +216,7 @@ end:
     }
     if (_linksList) {
         OpenAPI_list_for_each(_linksList, node) {
-            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*) node->data;
+            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*)node->data;
             ogs_free(localKeyValue->key);
             OpenAPI_links_value_schema_free(localKeyValue->value);
             OpenAPI_map_free(localKeyValue);

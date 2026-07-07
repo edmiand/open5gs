@@ -289,7 +289,7 @@ static void test_af_qos_reference_setup(abts_case *tc, const char *msin,
     ogs_assert((*af_sess)->dnn);
 
     af_local_discover_and_send(
-            OGS_SBI_SERVICE_TYPE_NBSF_MANAGEMENT,
+            OpenAPI_service_name_nbsf_management,
             *af_sess, NULL,
             af_nbsf_management_build_discover);
 
@@ -665,7 +665,7 @@ static void test1_func(abts_case *tc, void *data)
     ogs_assert(af_sess->dnn);
 
     af_local_discover_and_send(
-            OGS_SBI_SERVICE_TYPE_NBSF_MANAGEMENT,
+            OpenAPI_service_name_nbsf_management,
             af_sess, NULL,
             af_nbsf_management_build_discover);
 
@@ -1386,7 +1386,7 @@ static void test2_func(abts_case *tc, void *data)
     ogs_assert(af_sess->dnn);
 
     af_local_discover_and_send(
-            OGS_SBI_SERVICE_TYPE_NBSF_MANAGEMENT,
+            OpenAPI_service_name_nbsf_management,
             af_sess, NULL,
             af_nbsf_management_build_discover);
 
@@ -1820,7 +1820,7 @@ static void test3_func(abts_case *tc, void *data)
     ogs_assert(af_sess->dnn);
 
     af_local_discover_and_send(
-            OGS_SBI_SERVICE_TYPE_NBSF_MANAGEMENT,
+            OpenAPI_service_name_nbsf_management,
             af_sess, NULL,
             af_nbsf_management_build_discover);
 
@@ -2332,7 +2332,7 @@ static void test4_func(abts_case *tc, void *data)
     ogs_assert(af_sess->dnn);
 
     af_local_discover_and_send(
-            OGS_SBI_SERVICE_TYPE_NBSF_MANAGEMENT,
+            OpenAPI_service_name_nbsf_management,
             af_sess, NULL,
             af_nbsf_management_build_discover);
 
@@ -2923,7 +2923,7 @@ static void test5_func(abts_case *tc, void *data)
     ogs_assert(af_sess->dnn);
 
     af_local_discover_and_send(
-            OGS_SBI_SERVICE_TYPE_NBSF_MANAGEMENT,
+            OpenAPI_service_name_nbsf_management,
             af_sess, NULL,
             af_nbsf_management_build_discover);
 
@@ -3618,7 +3618,7 @@ static void test6_func(abts_case *tc, void *data)
     ogs_assert(af_sess1->dnn);
 
     af_local_discover_and_send(
-            OGS_SBI_SERVICE_TYPE_NBSF_MANAGEMENT,
+            OpenAPI_service_name_nbsf_management,
             af_sess1, NULL,
             af_nbsf_management_build_discover);
 
@@ -3686,7 +3686,7 @@ static void test6_func(abts_case *tc, void *data)
     ogs_assert(af_sess2->dnn);
 
     af_local_discover_and_send(
-            OGS_SBI_SERVICE_TYPE_NBSF_MANAGEMENT,
+            OpenAPI_service_name_nbsf_management,
             af_sess2, NULL,
             af_nbsf_management_build_discover);
 
@@ -4155,7 +4155,7 @@ static void test7_func(abts_case *tc, void *data)
     ogs_assert(af_sess->dnn);
 
     af_local_discover_and_send(
-            OGS_SBI_SERVICE_TYPE_NBSF_MANAGEMENT,
+            OpenAPI_service_name_nbsf_management,
             af_sess, NULL,
             af_nbsf_management_build_discover);
 

@@ -36,12 +36,12 @@ void pcf_sbi_close(void);
 bool pcf_sbi_send_request(
         ogs_sbi_nf_instance_t *nf_instance, ogs_sbi_xact_t *xact);
 int pcf_ue_am_sbi_discover_and_send(
-        ogs_sbi_service_type_e service_type,
+        OpenAPI_service_name_e service_name,
         ogs_sbi_discovery_option_t *discovery_option,
         ogs_sbi_request_t *(*build)(pcf_ue_am_t *pcf_ue_am, void *data),
         pcf_ue_am_t *pcf_ue_am, ogs_sbi_stream_t *stream, void *data);
 int pcf_sess_sbi_discover_and_send(
-        ogs_sbi_service_type_e service_type,
+        OpenAPI_service_name_e service_name,
         ogs_sbi_discovery_option_t *discovery_option,
         ogs_sbi_request_t *(*build)(pcf_sess_t *sess, void *data),
         pcf_sess_t *sess, ogs_sbi_stream_t *stream, void *data);
@@ -55,7 +55,8 @@ bool pcf_sbi_send_smpolicycontrol_delete_notify(
         pcf_sess_t *sess, pcf_app_t *app_session,
         OpenAPI_sm_policy_decision_t *SmPolicyDecision);
 
-bool pcf_sbi_send_policyauthorization_terminate_notify(pcf_app_t *app);
+bool pcf_sbi_send_policyauthorization_terminate_notify(pcf_app_t *app,
+        OpenAPI_termination_cause_e term_cause);
 
 #ifdef __cplusplus
 }

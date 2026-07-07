@@ -250,6 +250,10 @@ OpenAPI_nrf_info_served_mb_smf_info_list_value_value_t *OpenAPI_nrf_info_served_
                     ogs_error("OpenAPI_nrf_info_served_mb_smf_info_list_value_value_parseFromJSON() failed [inner]");
                     goto end;
                 }
+                if (localMapKeyPair == NULL) {
+                    ogs_error("OpenAPI_nrf_info_served_mb_smf_info_list_value_value_parseFromJSON() failed [s_nssai_info_list]");
+                    goto end;
+                }
                 OpenAPI_list_add(s_nssai_info_listList, localMapKeyPair);
             }
         }
@@ -274,6 +278,10 @@ OpenAPI_nrf_info_served_mb_smf_info_list_value_value_t *OpenAPI_nrf_info_served_
                     localMapKeyPair = OpenAPI_map_create(ogs_strdup(localMapObject->string), NULL);
                 } else {
                     ogs_error("OpenAPI_nrf_info_served_mb_smf_info_list_value_value_parseFromJSON() failed [inner]");
+                    goto end;
+                }
+                if (localMapKeyPair == NULL) {
+                    ogs_error("OpenAPI_nrf_info_served_mb_smf_info_list_value_value_parseFromJSON() failed [tmgi_range_list]");
                     goto end;
                 }
                 OpenAPI_list_add(tmgi_range_listList, localMapKeyPair);
@@ -350,6 +358,10 @@ OpenAPI_nrf_info_served_mb_smf_info_list_value_value_t *OpenAPI_nrf_info_served_
                     ogs_error("OpenAPI_nrf_info_served_mb_smf_info_list_value_value_parseFromJSON() failed [inner]");
                     goto end;
                 }
+                if (localMapKeyPair == NULL) {
+                    ogs_error("OpenAPI_nrf_info_served_mb_smf_info_list_value_value_parseFromJSON() failed [mbs_session_list]");
+                    goto end;
+                }
                 OpenAPI_list_add(mbs_session_listList, localMapKeyPair);
             }
         }
@@ -367,7 +379,7 @@ OpenAPI_nrf_info_served_mb_smf_info_list_value_value_t *OpenAPI_nrf_info_served_
 end:
     if (s_nssai_info_listList) {
         OpenAPI_list_for_each(s_nssai_info_listList, node) {
-            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*) node->data;
+            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*)node->data;
             ogs_free(localKeyValue->key);
             OpenAPI_snssai_mb_smf_info_item_free(localKeyValue->value);
             OpenAPI_map_free(localKeyValue);
@@ -377,7 +389,7 @@ end:
     }
     if (tmgi_range_listList) {
         OpenAPI_list_for_each(tmgi_range_listList, node) {
-            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*) node->data;
+            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*)node->data;
             ogs_free(localKeyValue->key);
             OpenAPI_tmgi_range_free(localKeyValue->value);
             OpenAPI_map_free(localKeyValue);
@@ -401,7 +413,7 @@ end:
     }
     if (mbs_session_listList) {
         OpenAPI_list_for_each(mbs_session_listList, node) {
-            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*) node->data;
+            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*)node->data;
             ogs_free(localKeyValue->key);
             OpenAPI_mbs_session_free(localKeyValue->value);
             OpenAPI_map_free(localKeyValue);

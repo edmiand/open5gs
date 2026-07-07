@@ -407,6 +407,10 @@ OpenAPI_nrf_info_served_scp_info_list_value_t *OpenAPI_nrf_info_served_scp_info_
                     ogs_error("OpenAPI_nrf_info_served_scp_info_list_value_parseFromJSON() failed [inner]");
                     goto end;
                 }
+                if (localMapKeyPair == NULL) {
+                    ogs_error("OpenAPI_nrf_info_served_scp_info_list_value_parseFromJSON() failed [scp_domain_info_list]");
+                    goto end;
+                }
                 OpenAPI_list_add(scp_domain_info_listList, localMapKeyPair);
             }
         }
@@ -445,6 +449,10 @@ OpenAPI_nrf_info_served_scp_info_list_value_t *OpenAPI_nrf_info_served_scp_info_
                 }
                 *localDouble = localMapObject->valuedouble;
                 localMapKeyPair = OpenAPI_map_create(ogs_strdup(localMapObject->string), localDouble);
+                if (localMapKeyPair == NULL) {
+                    ogs_error("OpenAPI_nrf_info_served_scp_info_list_value_parseFromJSON() failed [scp_ports]");
+                    goto end;
+                }
                 OpenAPI_list_add(scp_portsList, localMapKeyPair);
             }
         }
@@ -689,7 +697,7 @@ OpenAPI_nrf_info_served_scp_info_list_value_t *OpenAPI_nrf_info_served_scp_info_
 end:
     if (scp_domain_info_listList) {
         OpenAPI_list_for_each(scp_domain_info_listList, node) {
-            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*) node->data;
+            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*)node->data;
             ogs_free(localKeyValue->key);
             OpenAPI_scp_domain_info_free(localKeyValue->value);
             OpenAPI_map_free(localKeyValue);
@@ -699,7 +707,7 @@ end:
     }
     if (scp_portsList) {
         OpenAPI_list_for_each(scp_portsList, node) {
-            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*) node->data;
+            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*)node->data;
             ogs_free(localKeyValue->key);
             ogs_free(localKeyValue->value);
             OpenAPI_map_free(localKeyValue);

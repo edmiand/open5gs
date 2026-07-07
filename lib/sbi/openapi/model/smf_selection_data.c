@@ -192,6 +192,10 @@ OpenAPI_smf_selection_data_t *OpenAPI_smf_selection_data_parseFromJSON(cJSON *sm
                     ogs_error("OpenAPI_smf_selection_data_parseFromJSON() failed [inner]");
                     goto end;
                 }
+                if (localMapKeyPair == NULL) {
+                    ogs_error("OpenAPI_smf_selection_data_parseFromJSON() failed [candidates]");
+                    goto end;
+                }
                 OpenAPI_list_add(candidatesList, localMapKeyPair);
             }
         }
@@ -238,7 +242,7 @@ OpenAPI_smf_selection_data_t *OpenAPI_smf_selection_data_parseFromJSON(cJSON *sm
 end:
     if (candidatesList) {
         OpenAPI_list_for_each(candidatesList, node) {
-            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*) node->data;
+            OpenAPI_map_t *localKeyValue = (OpenAPI_map_t*)node->data;
             ogs_free(localKeyValue->key);
             OpenAPI_candidate_for_replacement_free(localKeyValue->value);
             OpenAPI_map_free(localKeyValue);

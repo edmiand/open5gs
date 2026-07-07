@@ -85,8 +85,8 @@ static void handle_nf_profile_retrieval(
         ogs_list_for_each(&nf_instance->nf_service_list, nf_service) {
             if (subscription_spec->subscr_cond.service_name &&
                 nf_service->name &&
-                !strcmp(subscription_spec->subscr_cond.service_name, nf_service->name))
-            {
+                subscription_spec->subscr_cond.service_name ==
+                    nf_service->name) {
                 /* ok; save the nf_instance */
                 save = true;
                 break;
@@ -215,6 +215,7 @@ void ogs_sbi_nf_state_will_register(ogs_fsm_t *s, ogs_event_t *e)
 {
     ogs_sbi_nf_instance_t *nf_instance = NULL;
     ogs_sbi_message_t *message = NULL;
+    int service_name_id = OpenAPI_service_name_NULL;
 
     ogs_assert(s);
     ogs_assert(e);
@@ -241,8 +242,10 @@ void ogs_sbi_nf_state_will_register(ogs_fsm_t *s, ogs_event_t *e)
         message = e->sbi.message;
         ogs_assert(message);
 
-        SWITCH(message->h.service.name)
-        CASE(OGS_SBI_SERVICE_NAME_NNRF_NFM)
+        service_name_id = ogs_sbi_service_name_id_from_string(
+                message->h.service.name);
+        switch (service_name_id) {
+        case OpenAPI_service_name_nnrf_nfm:
 
             SWITCH(message->h.resource.component[0])
             CASE(OGS_SBI_RESOURCE_NAME_NF_INSTANCES)
@@ -266,11 +269,11 @@ void ogs_sbi_nf_state_will_register(ogs_fsm_t *s, ogs_event_t *e)
             END
             break;
 
-        DEFAULT
+        default:
             ogs_error("[%s] Invalid API name [%s]",
                     NF_INSTANCE_ID(ogs_sbi_self()->nf_instance),
                     message->h.service.name);
-        END
+        }
         break;
 
     case OGS_EVENT_SBI_TIMER:
@@ -298,56 +301,11 @@ void ogs_sbi_nf_state_will_register(ogs_fsm_t *s, ogs_event_t *e)
     }
 }
 
-static bool nf_status_subscription_exists(
-        const char *req_nf_instance_id,
-        OpenAPI_nf_type_e nf_type,
-        const char *service_name)
-{
-    ogs_sbi_subscription_data_t *s = NULL;
-    bool same_nf_type = false;
-    bool same_service_name = false;
-    bool nf_type_present = false;
-    bool service_name_present = false;
-
-    ogs_assert(req_nf_instance_id);
-
-    nf_type_present = (nf_type != OpenAPI_nf_type_NULL);
-    service_name_present = (service_name != NULL);
-
-    ogs_list_for_each(&ogs_sbi_self()->subscription_data_list, s) {
-        if (!s->req_nf_instance_id)
-            continue;
-
-        if (strcmp(s->req_nf_instance_id, req_nf_instance_id) != 0)
-            continue;
-
-        if (s->flags & OGS_SBI_SUBSCRIPTION_DELETE_SENT)
-            continue;
-
-        same_nf_type = false;
-        same_service_name = false;
-
-        if (nf_type_present &&
-            s->subscr_cond.nf_type != OpenAPI_nf_type_NULL &&
-            s->subscr_cond.nf_type == nf_type)
-            same_nf_type = true;
-
-        if (service_name_present &&
-            s->subscr_cond.service_name &&
-            strcmp(s->subscr_cond.service_name, service_name) == 0)
-            same_service_name = true;
-
-        if (same_nf_type || same_service_name)
-            return true;
-    }
-
-    return false;
-}
-
 void ogs_sbi_nf_state_registered(ogs_fsm_t *s, ogs_event_t *e)
 {
     ogs_sbi_nf_instance_t *nf_instance = NULL;
     ogs_sbi_message_t *message = NULL;
+    int service_name_id = OpenAPI_service_name_NULL;
     ogs_assert(s);
     ogs_assert(e);
 
@@ -377,10 +335,11 @@ void ogs_sbi_nf_state_registered(ogs_fsm_t *s, ogs_event_t *e)
 
             ogs_list_for_each(
                 &ogs_sbi_self()->subscription_spec_list, subscription_spec) {
-                if (nf_status_subscription_exists(
+                if (ogs_sbi_nf_status_subscription_exists(
                             ogs_sbi_self()->nf_instance->id,
                             subscription_spec->subscr_cond.nf_type,
-                            subscription_spec->subscr_cond.service_name)) {
+                            subscription_spec->subscr_cond.service_name,
+                            false)) {
                     ogs_warn("[%s] NF status subscription already exists, skip",
                             ogs_sbi_self()->nf_instance->id);
                     continue;
@@ -413,8 +372,10 @@ void ogs_sbi_nf_state_registered(ogs_fsm_t *s, ogs_event_t *e)
         message = e->sbi.message;
         ogs_assert(message);
 
-        SWITCH(message->h.service.name)
-        CASE(OGS_SBI_SERVICE_NAME_NNRF_NFM)
+        service_name_id = ogs_sbi_service_name_id_from_string(
+                message->h.service.name);
+        switch (service_name_id) {
+        case OpenAPI_service_name_nnrf_nfm:
 
             SWITCH(message->h.resource.component[0])
             CASE(OGS_SBI_RESOURCE_NAME_NF_INSTANCES)
@@ -488,11 +449,11 @@ void ogs_sbi_nf_state_registered(ogs_fsm_t *s, ogs_event_t *e)
             END
             break;
 
-        DEFAULT
+        default:
             ogs_error("[%s] Invalid API name [%s]",
                     NF_INSTANCE_ID(ogs_sbi_self()->nf_instance),
                     message->h.service.name);
-        END
+        }
         break;
 
     case OGS_EVENT_SBI_TIMER:
@@ -591,6 +552,8 @@ void ogs_sbi_nf_state_exception(ogs_fsm_t *s, ogs_event_t *e)
 {
     ogs_sbi_nf_instance_t *nf_instance = NULL;
     ogs_sbi_message_t *message = NULL;
+    int service_name_id = OpenAPI_service_name_NULL;
+
     ogs_assert(s);
     ogs_assert(e);
 
@@ -636,8 +599,10 @@ void ogs_sbi_nf_state_exception(ogs_fsm_t *s, ogs_event_t *e)
         message = e->sbi.message;
         ogs_assert(message);
 
-        SWITCH(message->h.service.name)
-        CASE(OGS_SBI_SERVICE_NAME_NNRF_NFM)
+        service_name_id = ogs_sbi_service_name_id_from_string(
+                message->h.service.name);
+        switch (service_name_id) {
+        case OpenAPI_service_name_nnrf_nfm:
 
             SWITCH(message->h.resource.component[0])
             CASE(OGS_SBI_RESOURCE_NAME_NF_INSTANCES)
@@ -647,9 +612,9 @@ void ogs_sbi_nf_state_exception(ogs_fsm_t *s, ogs_event_t *e)
                         message->h.resource.component[0]);
             END
             break;
-        DEFAULT
+        default:
             ogs_error("Invalid API name [%s]", message->h.service.name);
-        END
+        }
         break;
 
     default:

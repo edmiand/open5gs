@@ -524,35 +524,19 @@ bool smf_nsmf_handle_create_sm_context(
         ul_pdr->f_teid.ch = 1;
         ul_pdr->f_teid_len = 1;
     } else {
-        ogs_gtpu_resource_t *resource = NULL;
+        ogs_assert(sess->pfcp_node->addr_list);
+        if (sess->pfcp_node->addr_list->ogs_sa_family == AF_INET)
+            ogs_assert(OGS_OK ==
+                ogs_copyaddrinfo(
+                    &sess->local_dl_addr, sess->pfcp_node->addr_list));
+        else if (sess->pfcp_node->addr_list->ogs_sa_family == AF_INET6)
+            ogs_assert(OGS_OK ==
+                ogs_copyaddrinfo(
+                    &sess->local_dl_addr6, sess->pfcp_node->addr_list));
+        else
+            ogs_assert_if_reached();
 
-        resource = ogs_pfcp_find_gtpu_resource(
-                &sess->pfcp_node->gtpu_resource_list,
-                sess->session.name, dl_pdr->src_if);
-        if (resource) {
-            ogs_user_plane_ip_resource_info_to_sockaddr(&resource->info,
-                &sess->local_dl_addr, &sess->local_dl_addr6);
-            if (resource->info.teidri)
-                sess->local_dl_teid = OGS_PFCP_GTPU_INDEX_TO_TEID(
-                        dl_pdr->teid, resource->info.teidri,
-                        resource->info.teid_range);
-            else
-                sess->local_dl_teid = dl_pdr->teid;
-        } else {
-            ogs_assert(sess->pfcp_node->addr_list);
-            if (sess->pfcp_node->addr_list->ogs_sa_family == AF_INET)
-                ogs_assert(OGS_OK ==
-                    ogs_copyaddrinfo(
-                        &sess->local_dl_addr, sess->pfcp_node->addr_list));
-            else if (sess->pfcp_node->addr_list->ogs_sa_family == AF_INET6)
-                ogs_assert(OGS_OK ==
-                    ogs_copyaddrinfo(
-                        &sess->local_dl_addr6, sess->pfcp_node->addr_list));
-            else
-                ogs_assert_if_reached();
-
-            sess->local_dl_teid = dl_pdr->teid;
-        }
+        sess->local_dl_teid = dl_pdr->teid;
 
         ogs_assert(OGS_OK ==
             ogs_pfcp_sockaddr_to_f_teid(
@@ -560,33 +544,19 @@ bool smf_nsmf_handle_create_sm_context(
                 &dl_pdr->f_teid, &dl_pdr->f_teid_len));
         dl_pdr->f_teid.teid = sess->local_ul_teid;
 
-        resource = ogs_pfcp_find_gtpu_resource(
-                &sess->pfcp_node->gtpu_resource_list,
-                sess->session.name, ul_pdr->src_if);
-        if (resource) {
-            ogs_user_plane_ip_resource_info_to_sockaddr(&resource->info,
-                &sess->local_ul_addr, &sess->local_ul_addr6);
-            if (resource->info.teidri)
-                sess->local_ul_teid = OGS_PFCP_GTPU_INDEX_TO_TEID(
-                        ul_pdr->teid, resource->info.teidri,
-                        resource->info.teid_range);
-            else
-                sess->local_ul_teid = ul_pdr->teid;
-        } else {
-            ogs_assert(sess->pfcp_node->addr_list);
-            if (sess->pfcp_node->addr_list->ogs_sa_family == AF_INET)
-                ogs_assert(OGS_OK ==
-                    ogs_copyaddrinfo(
-                        &sess->local_ul_addr, sess->pfcp_node->addr_list));
-            else if (sess->pfcp_node->addr_list->ogs_sa_family == AF_INET6)
-                ogs_assert(OGS_OK ==
-                    ogs_copyaddrinfo(
-                        &sess->local_ul_addr6, sess->pfcp_node->addr_list));
-            else
-                ogs_assert_if_reached();
+        ogs_assert(sess->pfcp_node->addr_list);
+        if (sess->pfcp_node->addr_list->ogs_sa_family == AF_INET)
+            ogs_assert(OGS_OK ==
+                ogs_copyaddrinfo(
+                    &sess->local_ul_addr, sess->pfcp_node->addr_list));
+        else if (sess->pfcp_node->addr_list->ogs_sa_family == AF_INET6)
+            ogs_assert(OGS_OK ==
+                ogs_copyaddrinfo(
+                    &sess->local_ul_addr6, sess->pfcp_node->addr_list));
+        else
+            ogs_assert_if_reached();
 
-            sess->local_ul_teid = ul_pdr->teid;
-        }
+        sess->local_ul_teid = ul_pdr->teid;
 
         ogs_assert(OGS_OK ==
             ogs_pfcp_sockaddr_to_f_teid(
@@ -870,7 +840,7 @@ bool smf_nsmf_handle_update_sm_context(
                     }
 
                     r = smf_sbi_discover_and_send(
-                            OGS_SBI_SERVICE_TYPE_NSMF_PDUSESSION, NULL,
+                            OpenAPI_service_name_nsmf_pdusession, NULL,
                             smf_nsmf_pdusession_build_hsmf_update_data,
                             sess, stream, SMF_UPDATE_STATE_DEACTIVATED, NULL);
                     ogs_expect(r == OGS_OK);
@@ -962,7 +932,7 @@ bool smf_nsmf_handle_update_sm_context(
                     SmContextUpdateData->up_cnx_state;
 
                 r = smf_sbi_discover_and_send(
-                        OGS_SBI_SERVICE_TYPE_NSMF_PDUSESSION, NULL,
+                        OpenAPI_service_name_nsmf_pdusession, NULL,
                         smf_nsmf_pdusession_build_hsmf_update_data,
                         sess, stream, SMF_UPDATE_STATE_ACTIVATING, NULL);
                 ogs_expect(r == OGS_OK);
@@ -1666,7 +1636,7 @@ bool smf_nsmf_handle_create_data_in_hsmf(
     smf_metrics_inst_by_slice_add(&sess->serving_plmn_id, &sess->s_nssai,
             SMF_METR_CTR_SM_PDUSESSIONCREATIONREQ, 1);
 
-    r = smf_sbi_discover_and_send(OGS_SBI_SERVICE_TYPE_NUDM_SDM, NULL,
+    r = smf_sbi_discover_and_send(OpenAPI_service_name_nudm_sdm, NULL,
             smf_nudm_sdm_build_get,
             sess, stream, 0, (char *)OGS_SBI_RESOURCE_NAME_SM_DATA);
     ogs_expect(r == OGS_OK);
@@ -1997,7 +1967,9 @@ bool smf_nsmf_handle_created_data_in_vsmf(
                     ogs_sbi_bitrate_from_string(sessionAmbr->downlink);
         }
 
-        sess->h_smf_id = PduSessionCreatedData->h_smf_instance_id;
+        if (sess->h_smf_id)
+            ogs_free(sess->h_smf_id);
+        sess->h_smf_id = ogs_strdup(PduSessionCreatedData->h_smf_instance_id);
 
         if (!recvmsg->http.location) {
             ogs_error("[%s:%d] No http.location", smf_ue->supi, sess->psi);
