@@ -223,6 +223,51 @@ do_clear_logs() {
     printf "Done. Total freed: %d KB\n" "$total_freed"
 }
 
+do_logs() {
+    local pattern=""
+    if [[ $# -gt 1 ]]; then
+        echo "ERROR: logs takes at most one <pattern> argument" >&2
+        usage
+    fi
+    [[ $# -eq 1 ]] && pattern=$1
+
+    local -a files=()
+    local f
+    for f in "$LOGDIR"/*.log; do
+        [[ -f $f ]] || continue
+        [[ $(basename "$f") == webui.log ]] && continue
+        files+=("$f")
+    done
+    if [[ ${#files[@]} -eq 0 ]]; then
+        echo "ERROR: no log files found in $LOGDIR" >&2
+        exit 1
+    fi
+
+    # Root-owned logs (upf) are not readable by the normal user — tail via sudo then.
+    local -a tail_cmd=(tail)
+    for f in "${files[@]}"; do
+        if [[ ! -r $f ]]; then tail_cmd=(sudo tail); break; fi
+    done
+
+    # Deeper history when filtering, so recent matching events are included.
+    local hist=50
+    [[ -n $pattern ]] && hist=2000
+
+    # awk turns tail's "==> /path/<nf>.log <==" headers into a per-line "nf | " prefix;
+    # fflush keeps output live through the pipe.
+    local prefix_awk='
+        /^==> .* <==$/ { nf=$2; sub(/^.*\//,"",nf); sub(/\.log$/,"",nf); next }
+        { printf "%-7s| %s\n", nf, $0; fflush() }'
+
+    if [[ -n $pattern ]]; then
+        "${tail_cmd[@]}" -v -n "$hist" -F "${files[@]}" \
+            | awk "$prefix_awk" \
+            | grep -a --line-buffered -iE -e "$pattern"
+    else
+        "${tail_cmd[@]}" -v -n "$hist" -F "${files[@]}" | awk "$prefix_awk"
+    fi
+}
+
 do_stop() {
     local -a targets
     if [[ $# -gt 0 ]]; then
@@ -279,12 +324,14 @@ do_status() {
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") {start|stop|restart|status|clear-logs} [nf ...]
+Usage: $(basename "$0") {start|stop|restart|status|logs|clear-logs} [nf ...]
 
   start       [nf ...]   Start all 5GC NFs (or specific ones), in order
   stop        [nf ...]   Stop all 5GC NFs in reverse order (or specific ones)
   restart     [nf ...]   Stop then start (all or specific NFs)
   status      [nf ...]   Show running status
+  logs        [pattern]  Follow live logs of all NFs, each line prefixed with the
+                         NF name; optional pattern filters lines (e.g. an IMSI)
   clear-logs              Truncate all NF log files in-place
 
 NF order: ${NFS_5GC[*]} webui
@@ -295,6 +342,8 @@ Examples:
   $(basename "$0") restart upf
   $(basename "$0") restart webui
   $(basename "$0") status
+  $(basename "$0") logs
+  $(basename "$0") logs 999700000000001
   $(basename "$0") clear-logs
 EOF
     exit 1
@@ -309,6 +358,7 @@ case $CMD in
     stop)    do_stop    "$@" ;;
     restart) do_restart "$@" ;;
     status)  do_status  "$@" ;;
+    logs)    do_logs    "$@" ;;
     clear-logs) do_clear_logs ;;
     *)       usage ;;
 esac
