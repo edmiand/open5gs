@@ -172,13 +172,14 @@ main() {
     fi
 
     # ── 8. stop -> install -> start ─────────────────────────────────────────
+    capture_log_baselines "$OPEN5GS_DIR" "${NFS_ROOT[*]}" "${NFS_ORDER[@]}"
     echo "Stopping NFs (reverse dependency order)..."
     "$CTL" stop
 
     echo "Installing (ninja -C build install)..."
     if ! ninja -C "$OPEN5GS_DIR/build" install; then
         echo "ERROR: install failed after NFs were stopped. Attempting rollback..." >&2
-        rollback_to "$OPEN5GS_DIR" "$old_sha" "$CTL" "${NFS_ORDER[@]}"
+        rollback_to "$OPEN5GS_DIR" "$old_sha" "$CTL" "${NFS_ROOT[*]}" "${NFS_ORDER[@]}"
         exit 1
     fi
 
@@ -197,7 +198,7 @@ main() {
 
     echo
     echo "== HEALTH CHECK FAILED == rolling back to $old_sha automatically..." >&2
-    if rollback_to "$OPEN5GS_DIR" "$old_sha" "$CTL" "${NFS_ORDER[@]}"; then
+    if rollback_to "$OPEN5GS_DIR" "$old_sha" "$CTL" "${NFS_ROOT[*]}" "${NFS_ORDER[@]}"; then
         if health_check_all "$OPEN5GS_DIR" "${NFS_ROOT[*]}" "${NFS_ORDER[@]}"; then
             echo "== ROLLED BACK OK == core is back on $old_sha and healthy. Upgrade to $new_sha did NOT stick." >&2
             exit 1
@@ -310,12 +311,40 @@ except Exception:
 PYEOF
 }
 
+# capture_log_baselines <open5gs_dir> <root_nfs_space_separated> <nf...> —
+# record each NF's current log line count before a stop/start cycle. NF logs
+# are never truncated across restarts, so without this, health_check_all's
+# "recent errors" check would flag stale ERROR/FATAL lines left over from a
+# prior day's session as if they were caused by this restart. root_nfs (e.g.
+# upf) write logs as root, so those need sudo to read, same as health_check_all.
+capture_log_baselines() {
+    local open5gs_dir=$1 root_nfs=$2; shift 2
+    local baseline_dir="$open5gs_dir/install/.upgrade-state/log-baseline"
+    mkdir -p "$baseline_dir"
+    local nf log lines
+    for nf in "$@"; do
+        log="$open5gs_dir/install/var/log/open5gs/${nf}.log"
+        if [[ " $root_nfs " == *" $nf "* ]]; then
+            lines=$(sudo cat "$log" 2>/dev/null | wc -l)
+        else
+            lines=$(wc -l < "$log" 2>/dev/null)
+        fi
+        echo "${lines:-0}" > "$baseline_dir/${nf}.lines"
+    done
+}
+
 # health_check_all <open5gs_dir> <root_nfs_space_separated> <nf...>
-# Real health, not just "process exists": pid alive, metrics endpoint
-# responding, and no new FATAL/ERROR lines in the log since restart.
+# Real health, not just "process exists": pid alive; metrics endpoint
+# responding (only checked for NFs that actually have a metrics: block
+# configured — most 5GC NFs in this lab don't, so skipping the rest avoids
+# a guaranteed-unreachable false positive); and no new FATAL/ERROR log
+# lines since the restart, per capture_log_baselines above (not just "last
+# 100 lines", which picks up stale errors from long-lived, never-truncated
+# logs regardless of how old they are).
 health_check_all() {
     local open5gs_dir=$1 root_nfs=$2; shift 2
     local nf all_ok=1
+    local baseline_dir="$open5gs_dir/install/.upgrade-state/log-baseline"
     printf "\n%-8s %-8s %-12s %-10s\n" "NF" "PID" "METRICS" "RECENT-ERR"
     printf "%-8s %-8s %-12s %-10s\n" "--------" "--------" "------------" "----------"
     for nf in "$@"; do
@@ -323,35 +352,52 @@ health_check_all() {
         pid=$(pgrep "open5gs-${nf}d" 2>/dev/null | head -1)
         if [[ -z $pid ]]; then ok=0; fi
 
-        local metrics_status="unreachable"
-        if [[ -n $pid ]]; then
+        local metrics_status="n/a"
+        if [[ -n $pid ]] && grep -q "metrics:" "$open5gs_dir/install/etc/open5gs/${nf}.yaml" 2>/dev/null; then
             local url; url=$(metrics_url_for "$open5gs_dir" "$nf")
             if curl -sf --max-time 2 "${url}/metrics" >/dev/null 2>&1; then
                 metrics_status="ok"
             else
+                metrics_status="unreachable"
                 ok=0
             fi
         fi
 
         local log="$open5gs_dir/install/var/log/open5gs/${nf}.log"
-        local err_count=0
+        local baseline=""
+        [[ -f "$baseline_dir/${nf}.lines" ]] && baseline=$(cat "$baseline_dir/${nf}.lines")
+        [[ $baseline =~ ^[0-9]+$ ]] || baseline=0
+        local total_lines=""
         if [[ " $root_nfs " == *" $nf "* ]]; then
-            err_count=$(sudo tail -n 100 "$log" 2>/dev/null | grep -Ecai "FATAL|ERROR" || true)
+            total_lines=$(sudo cat "$log" 2>/dev/null | wc -l)
         else
-            err_count=$(tail -n 100 "$log" 2>/dev/null | grep -Ecai "FATAL|ERROR" || true)
+            total_lines=$(wc -l < "$log" 2>/dev/null)
+        fi
+        [[ $total_lines =~ ^[0-9]+$ ]] || total_lines=0
+        local new_lines=$(( total_lines - baseline ))
+        (( new_lines < 0 )) && new_lines=0
+
+        local err_count=0
+        if (( new_lines > 0 )); then
+            if [[ " $root_nfs " == *" $nf "* ]]; then
+                err_count=$(sudo tail -n "$new_lines" "$log" 2>/dev/null | grep -Ecai "FATAL|ERROR" || true)
+            else
+                err_count=$(tail -n "$new_lines" "$log" 2>/dev/null | grep -Ecai "FATAL|ERROR" || true)
+            fi
         fi
         (( err_count > 0 )) && ok=0
 
-        printf "%-8s %-8s %-12s %-10s\n" "$nf" "${pid:-none}" "$metrics_status" "${err_count} in last 100 lines"
+        printf "%-8s %-8s %-12s %-10s\n" "$nf" "${pid:-none}" "$metrics_status" "${err_count} since restart"
         (( ok )) || all_ok=0
     done
     echo
     (( all_ok ))
 }
 
-# rollback_to <open5gs_dir> <target_sha> <ctl_script> <nf...>
+# rollback_to <open5gs_dir> <target_sha> <ctl_script> <root_nfs_space_separated> <nf...>
 rollback_to() {
-    local open5gs_dir=$1 target_sha=$2 ctl=$3; shift 3
+    local open5gs_dir=$1 target_sha=$2 ctl=$3 root_nfs=$4; shift 4
+    capture_log_baselines "$open5gs_dir" "$root_nfs" "$@"
     echo "Stopping NFs..."
     "$ctl" stop
     echo "Checking out $target_sha..."
@@ -374,7 +420,7 @@ do_manual_rollback() {
     [[ -f $sha_file ]] || die "No recorded rollback point at $sha_file — nothing to roll back to."
     local target_sha; target_sha=$(cat "$sha_file")
     echo "Rolling back $open5gs_dir to $target_sha..."
-    rollback_to "$open5gs_dir" "$target_sha" "$ctl" "$@" || die "Rollback failed."
+    rollback_to "$open5gs_dir" "$target_sha" "$ctl" "$root_nfs" "$@" || die "Rollback failed."
     if health_check_all "$open5gs_dir" "$root_nfs" "$@"; then
         echo "Rollback OK — core is on $target_sha and healthy."
         return 0
