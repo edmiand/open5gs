@@ -1514,6 +1514,17 @@ void sgwc_s11_handle_release_access_bearers_request(
 
     ogs_list_for_each(&sgwc_ue->sess_list, sess) {
 
+        /*
+         * A PDN connection is never expected to lose its last bearer while
+         * staying in sgwc_ue->sess_list. Keep the assert, but identify the
+         * PDN connection first - the assert alone does not tell which one
+         * it was.
+         */
+        if (ogs_list_count(&sess->bearer_list) == 0)
+            ogs_fatal("No Bearer [imsi:%s sess_id:%d apn:%s "
+                    "sgw_s5c_teid:0x%x pgw_s5c_teid:0x%x]",
+                    sgwc_ue->imsi_bcd, sess->id, sess->session.name,
+                    sess->sgw_s5c_teid, sess->pgw_s5c_teid);
         ogs_assert(ogs_list_count(&sess->bearer_list));
         ogs_info("    sess_id=%d xact=%p", sess->id, s11_xact);
         ogs_assert(OGS_OK ==
@@ -1672,12 +1683,29 @@ void sgwc_s11_handle_create_indirect_data_forwarding_tunnel_request(
             req_teid = req->bearer_contexts[i].s1_u_enodeb_f_teid.data;
             ogs_assert(req_teid);
 
-            tunnel = sgwc_tunnel_add(bearer,
+            /*
+             * If the indirect data forwarding tunnel of the previous
+             * handover has not been deleted -- the MME does not always
+             * send Delete Indirect Data Forwarding Tunnel Request --
+             * re-use it.
+             *
+             * OGS_MAX_NUM_OF_PDR is dimensioned for a single forwarding
+             * pair per bearer, so allocating a new PDR/FAR on every
+             * handover exhausts the PDR pool of the session.
+             */
+            tunnel = sgwc_tunnel_find_by_interface_type(bearer,
                     OGS_GTP2_F_TEID_SGW_GTP_U_FOR_DL_DATA_FORWARDING);
-            if (!tunnel) {
-                ogs_error("sgwc_tunnel_add() failed");
-                cause_value = OGS_GTP2_CAUSE_SYSTEM_FAILURE;
-                goto cleanup;
+            if (tunnel) {
+                ogs_error("[%s] Re-use indirect DL tunnel [EBI:%d]",
+                        sgwc_ue->imsi_bcd, bearer->ebi);
+            } else {
+                tunnel = sgwc_tunnel_add(bearer,
+                        OGS_GTP2_F_TEID_SGW_GTP_U_FOR_DL_DATA_FORWARDING);
+                if (!tunnel) {
+                    ogs_error("sgwc_tunnel_add() failed");
+                    cause_value = OGS_GTP2_CAUSE_SYSTEM_FAILURE;
+                    goto cleanup;
+                }
             }
 
             tunnel->remote_teid = be32toh(req_teid->teid);
@@ -1720,12 +1748,20 @@ void sgwc_s11_handle_create_indirect_data_forwarding_tunnel_request(
             req_teid = req->bearer_contexts[i].s12_rnc_f_teid.data;
             ogs_assert(req_teid);
 
-            tunnel = sgwc_tunnel_add(bearer,
+            /* See the comment on the DL data forwarding tunnel above */
+            tunnel = sgwc_tunnel_find_by_interface_type(bearer,
                     OGS_GTP2_F_TEID_SGW_GTP_U_FOR_UL_DATA_FORWARDING);
-            if (!tunnel) {
-                ogs_error("sgwc_tunnel_add() failed");
-                cause_value = OGS_GTP2_CAUSE_SYSTEM_FAILURE;
-                goto cleanup;
+            if (tunnel) {
+                ogs_error("[%s] Re-use indirect UL tunnel [EBI:%d]",
+                        sgwc_ue->imsi_bcd, bearer->ebi);
+            } else {
+                tunnel = sgwc_tunnel_add(bearer,
+                        OGS_GTP2_F_TEID_SGW_GTP_U_FOR_UL_DATA_FORWARDING);
+                if (!tunnel) {
+                    ogs_error("sgwc_tunnel_add() failed");
+                    cause_value = OGS_GTP2_CAUSE_SYSTEM_FAILURE;
+                    goto cleanup;
+                }
             }
 
             tunnel->remote_teid = be32toh(req_teid->teid);
@@ -1768,6 +1804,11 @@ void sgwc_s11_handle_create_indirect_data_forwarding_tunnel_request(
     ogs_list_for_each(&sgwc_ue->sess_list, sess) {
         bool has_indirect = false;
 
+        if (ogs_list_count(&sess->bearer_list) == 0)
+            ogs_fatal("No Bearer [imsi:%s sess_id:%d apn:%s "
+                    "sgw_s5c_teid:0x%x pgw_s5c_teid:0x%x]",
+                    sgwc_ue->imsi_bcd, sess->id, sess->session.name,
+                    sess->sgw_s5c_teid, sess->pgw_s5c_teid);
         ogs_assert(ogs_list_count(&sess->bearer_list));
         ogs_list_for_each(&sess->bearer_list, bearer) {
             ogs_list_for_each(&bearer->tunnel_list, tunnel) {
