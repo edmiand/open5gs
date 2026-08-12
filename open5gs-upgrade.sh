@@ -21,12 +21,14 @@ set -uo pipefail
 
 main() {
     local SCRIPT_DIR; SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local OPEN5GS_DIR="${OPEN5GS_DIR:-$SCRIPT_DIR}"
+    # OPEN5GS_DIR and SHA_FILE are deliberately global (no `local`): on_interrupt
+    # below needs to read them if a signal cuts this script off mid-operation.
+    OPEN5GS_DIR="${OPEN5GS_DIR:-$SCRIPT_DIR}"
     # State/logs live under install/, which is wholly gitignored — keeps
     # this checkout clean of scratch files that don't belong in the repo.
     local STATE_DIR="$OPEN5GS_DIR/install/.upgrade-state"
     local LOG_DIR="$OPEN5GS_DIR/install/var/log/open5gs-upgrade"
-    local SHA_FILE="$STATE_DIR/last-good.sha"
+    SHA_FILE="$STATE_DIR/last-good.sha"
     local RUN_LOG="$LOG_DIR/upgrade-$(date -u +%Y%m%dT%H%M%SZ).log"
     mkdir -p "$STATE_DIR" "$LOG_DIR"
 
@@ -54,8 +56,20 @@ main() {
 
     local NFS_ORDER=(nrf scp amf smf upf ausf udm pcf nssf bsf udr)
     local NFS_ROOT=(upf)
-    local CTL="$OPEN5GS_DIR/open5gs-ctl.sh"
+    # Also global — same reason as OPEN5GS_DIR/SHA_FILE above.
+    CTL="$OPEN5GS_DIR/open5gs-ctl.sh"
     [[ -x "$CTL" ]] || die "Control script not found or not executable: $CTL"
+
+    # If this script is killed mid-operation (dropped SSH session, closed
+    # terminal, manual kill), don't let it fail silently into an inconsistent
+    # state. This matters especially here because NFs are daemonized (-D):
+    # they double-fork and detach into their own session, so a signal sent to
+    # this script's process group does NOT reach them — only non-daemonized
+    # children (e.g. webui, run as a plain background job) die with it. That
+    # split is exactly what makes an interrupted stop/rollback confusing: some
+    # NFs stop, most don't, and the terminal just shows "Terminated" with no
+    # indication of which is which.
+    trap on_interrupt INT TERM
 
     if (( DO_ROLLBACK )); then
         do_manual_rollback "$OPEN5GS_DIR" "$SHA_FILE" "$CTL" "${NFS_ROOT[*]}" "${NFS_ORDER[@]}"
@@ -214,6 +228,35 @@ main() {
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
+# on_interrupt — trapped on INT/TERM (see trap install site in main). Prints
+# what actually happened instead of leaving a bare "Terminated" and a stale
+# "rolling back automatically..." banner that never finished. OPEN5GS_DIR,
+# SHA_FILE, and CTL are set as globals in main() specifically so this handler
+# can read them regardless of where main() was interrupted.
+on_interrupt() {
+    trap - INT TERM   # don't re-enter on a second signal while we print
+    echo >&2
+    echo "== INTERRUPTED == open5gs-upgrade.sh was killed mid-operation." >&2
+    echo "Any banner printed above (e.g. \"rolling back automatically...\") may not have" >&2
+    echo "finished — treat it as unknown, not as handled. Actual state:" >&2
+    echo "  git HEAD now:            $(git -C "$OPEN5GS_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)" >&2
+    if [[ -f ${SHA_FILE:-} ]]; then
+        echo "  last known-good commit:  $(cat "$SHA_FILE")" >&2
+    else
+        echo "  last known-good commit:  none recorded" >&2
+    fi
+    echo "  NFs may be a mix of stopped and still-running: daemonized NFs (-D) detach" >&2
+    echo "  from this terminal's session, so this signal did not reach them — only" >&2
+    echo "  non-daemonized processes (e.g. webui) were killed along with this script." >&2
+    echo >&2
+    echo "Recovery:" >&2
+    echo "  1. ${CTL:-./open5gs-ctl.sh} status   # see what is actually running" >&2
+    echo "  2. $0 --rollback           # idempotent — safe to re-run; forces git," >&2
+    echo "                                          # binaries, and every NF back onto" >&2
+    echo "                                          # the last known-good commit" >&2
+    exit 130
+}
+
 confirm() {
     local prompt=$1 ans
     read -r -p "$prompt [y/N] " ans
@@ -343,8 +386,17 @@ capture_log_baselines() {
 # logs regardless of how old they are).
 health_check_all() {
     local open5gs_dir=$1 root_nfs=$2; shift 2
-    local nf all_ok=1
+    local nf all_ok=1 filtered_total=0
     local baseline_dir="$open5gs_dir/install/.upgrade-state/log-baseline"
+    # Each entry: a startup-time ERROR/FATAL pattern confirmed present across
+    # multiple *unrelated* restarts (not introduced by any upgrade), so
+    # counting it would fail health_check_all on noise instead of regressions.
+    #   - "STREAM has already been removed" (src/scp/sbi-path.c:858, upstream
+    #     6cb518539b from 2024-06-12): a stream-cleanup race when several NFs
+    #     register with SCP in the same burst at startup. Seen identically in
+    #     restarts on 2026-08-07, 2026-08-08, and 2026-08-11 — including the
+    #     2026-08-11 run that wasn't near any change to lib/sbi or src/scp.
+    local BENIGN_STARTUP_ERR_PATTERNS="STREAM has already been removed"
     printf "\n%-8s %-8s %-12s %-10s\n" "NF" "PID" "METRICS" "RECENT-ERR"
     printf "%-8s %-8s %-12s %-10s\n" "--------" "--------" "------------" "----------"
     for nf in "$@"; do
@@ -379,10 +431,26 @@ health_check_all() {
 
         local err_count=0
         if (( new_lines > 0 )); then
+            local raw_errlines
             if [[ " $root_nfs " == *" $nf "* ]]; then
-                err_count=$(sudo tail -n "$new_lines" "$log" 2>/dev/null | grep -Ecai "FATAL|ERROR" || true)
+                raw_errlines=$(sudo tail -n "$new_lines" "$log" 2>/dev/null | grep -Eai "FATAL|ERROR" || true)
             else
-                err_count=$(tail -n "$new_lines" "$log" 2>/dev/null | grep -Ecai "FATAL|ERROR" || true)
+                raw_errlines=$(tail -n "$new_lines" "$log" 2>/dev/null | grep -Eai "FATAL|ERROR" || true)
+            fi
+            if [[ -n $raw_errlines ]]; then
+                local raw_count kept_errlines kept_count
+                raw_count=$(wc -l <<<"$raw_errlines")
+                # Known-benign noise, not a regression: excluded so a routine
+                # restart doesn't trigger a false-positive automatic rollback.
+                # See BENIGN_STARTUP_ERR_PATTERNS above for why each entry is here.
+                kept_errlines=$(grep -Eav "$BENIGN_STARTUP_ERR_PATTERNS" <<<"$raw_errlines" || true)
+                if [[ -n $kept_errlines ]]; then
+                    kept_count=$(wc -l <<<"$kept_errlines")
+                else
+                    kept_count=0
+                fi
+                err_count=$kept_count
+                (( filtered_total += raw_count - kept_count ))
             fi
         fi
         (( err_count > 0 )) && ok=0
@@ -390,6 +458,7 @@ health_check_all() {
         printf "%-8s %-8s %-12s %-10s\n" "$nf" "${pid:-none}" "$metrics_status" "${err_count} since restart"
         (( ok )) || all_ok=0
     done
+    (( filtered_total > 0 )) && echo "(ignored $filtered_total known-benign error line(s) — see BENIGN_STARTUP_ERR_PATTERNS in this script)"
     echo
     (( all_ok ))
 }
