@@ -396,7 +396,15 @@ health_check_all() {
     #     register with SCP in the same burst at startup. Seen identically in
     #     restarts on 2026-08-07, 2026-08-08, and 2026-08-11 — including the
     #     2026-08-11 run that wasn't near any change to lib/sbi or src/scp.
-    local BENIGN_STARTUP_ERR_PATTERNS="STREAM has already been removed"
+    #   - "NF instance FSM has been finalized" (src/scp/scp-sm.c:200): logged
+    #     deliberately, per the comment right above that call site, when an
+    #     SBI response (e.g. an NRF-notify callback) arrives for an NF
+    #     instance whose FSM was already torn down by event_termination() —
+    #     the code explicitly logs-and-drops instead of dispatching into a
+    #     dead FSM, so this is the intended safe path, not a crash. Seen on
+    #     the 2026-08-14 restart, which touched amf/mme/smf only, nowhere
+    #     near src/scp.
+    local BENIGN_STARTUP_ERR_PATTERNS="STREAM has already been removed|NF instance FSM has been finalized"
     printf "\n%-8s %-8s %-12s %-10s\n" "NF" "PID" "METRICS" "RECENT-ERR"
     printf "%-8s %-8s %-12s %-10s\n" "--------" "--------" "------------" "----------"
     for nf in "$@"; do

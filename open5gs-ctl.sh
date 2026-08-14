@@ -147,10 +147,17 @@ start_one() {
     fi
 
     mkdir -p "$RUNDIR" "$LOGDIR"
+    # Open5GS always logs to stderr (colored) in addition to the file it's
+    # configured with (logger.file.path in <nf>.yaml, plain). Redirecting
+    # stderr into that same *.log would duplicate every line — one colored,
+    # one plain — which throws off anything that counts ERROR/FATAL lines
+    # (see open5gs-upgrade.sh's health_check_all). Stderr goes to a separate
+    # file instead: still useful for crashes that happen before the file
+    # writer is registered, but it no longer pollutes the real log.
     if needs_root "$nf"; then
-        sudo sh -c "\"$bin\" -D >> \"$LOGDIR/${nf}.log\" 2>&1"
+        sudo sh -c "\"$bin\" -D >> \"$LOGDIR/${nf}-stdout.log\" 2>&1"
     else
-        "$bin" -D >> "$LOGDIR/${nf}.log" 2>&1
+        "$bin" -D >> "$LOGDIR/${nf}-stdout.log" 2>&1
     fi
     sleep 1.5
 
