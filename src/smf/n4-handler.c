@@ -1229,6 +1229,26 @@ uint8_t smf_epc_n4_handle_session_establishment_response(
     return OGS_PFCP_CAUSE_REQUEST_ACCEPTED;
 }
 
+/*
+ * The Error Indication procedure cannot go on : either no Delete Bearer
+ * Request was sent at all, or the bearer could not be removed.  Drop the
+ * mark so that a later Error Indication can start it again.
+ */
+static void clear_ei_deactivation(
+        smf_sess_t *sess, smf_bearer_t *bearer, uint64_t flags)
+{
+    ogs_assert(sess);
+
+    if (flags &
+            (OGS_PFCP_MODIFY_ERROR_INDICATION|OGS_PFCP_MODIFY_REMOVE)) {
+        if (flags & OGS_PFCP_MODIFY_SESSION)
+            bearer = smf_default_bearer_in_sess(sess);
+
+        if (bearer)
+            bearer->ei_deactivation = false;
+    }
+}
+
 void smf_epc_n4_handle_session_modification_response(
         smf_sess_t *sess, ogs_pfcp_xact_t *xact,
         ogs_gtp2_message_t *recv_message,
@@ -1255,14 +1275,15 @@ void smf_epc_n4_handle_session_modification_response(
 
     ogs_debug("Session Modification Response [epc]");
 
+    flags = xact->modify_flags;
+    ogs_assert(flags);
+
     if (flags & OGS_PFCP_MODIFY_SESSION) {
         /* If smf_epc_pfcp_send_pdr_modification_request() is called */
     } else {
         /* If smf_epc_pfcp_send_bearer_modification_request() is called */
         bearer = smf_bearer_find_by_id(OGS_POINTER_TO_UINT(xact->data));
     }
-    flags = xact->modify_flags;
-    ogs_assert(flags);
 
     /* OGS_PFCP_MODIFY_URR: Modification Response was originally triggered by
        PFCP Session Report Request, xact->assoc_xact is not a gtp_xact. No
@@ -1285,10 +1306,12 @@ void smf_epc_n4_handle_session_modification_response(
     if (rsp->cause.presence) {
         if (rsp->cause.u8 != OGS_PFCP_CAUSE_REQUEST_ACCEPTED) {
             ogs_error("PFCP Cause [%d] : Not Accepted", rsp->cause.u8);
+            clear_ei_deactivation(sess, bearer, flags);
             return;
         }
     } else {
         ogs_error("No Cause");
+        clear_ei_deactivation(sess, bearer, flags);
         return;
     }
 
@@ -1339,6 +1362,7 @@ void smf_epc_n4_handle_session_modification_response(
 
     if (pfcp_cause_value != OGS_PFCP_CAUSE_REQUEST_ACCEPTED) {
         ogs_error("PFCP Cause [%d] : Not Accepted", pfcp_cause_value);
+        clear_ei_deactivation(sess, bearer, flags);
         return;
     }
 
@@ -1565,21 +1589,26 @@ uint8_t smf_epc_n4_handle_session_deletion_response(
     return OGS_PFCP_CAUSE_REQUEST_ACCEPTED;
 }
 
-/* Returns OGS_PFCP_CAUSE_REQUEST_ACCEPTED on success,
- * other cause value on failure */
-uint8_t smf_n4_handle_session_report_request(
+/*
+ * Returns true when the report requires the session to be released
+ * (Gy Final-Unit-Indication or no Gy peer).  A malformed or otherwise
+ * rejected report is answered with an error response but never releases
+ * the session, so it returns false.
+ */
+bool smf_n4_handle_session_report_request(
         smf_sess_t *sess, ogs_pfcp_xact_t *pfcp_xact,
         ogs_pfcp_session_report_request_t *pfcp_req)
 {
     smf_ue_t *smf_ue = NULL;
     smf_bearer_t *qos_flow = NULL;
     smf_bearer_t *bearer = NULL;
+    smf_bearer_t *linked_bearer = NULL;
     ogs_pfcp_pdr_t *pdr = NULL;
     ogs_pfcp_far_t *far = NULL;
 
     ogs_pfcp_report_type_t report_type;
-    uint8_t cause_value = 0;
     uint16_t pdr_id = 0;
+    bool release_session = false;
     unsigned int i;
 
     smf_metrics_inst_global_inc(SMF_METR_GLOB_CTR_SM_N4SESSIONREPORT);
@@ -1589,23 +1618,26 @@ uint8_t smf_n4_handle_session_report_request(
 
     ogs_debug("Session Report Request");
 
-    cause_value = OGS_PFCP_CAUSE_REQUEST_ACCEPTED;
-
+    /*
+     * pfcp-sm.c rejects a Session Report Request with no session before it
+     * reaches the FSM, so sess is always set here.  Keep the guard as a
+     * defensive check.
+     */
     if (!sess) {
         ogs_error("No Context");
-        cause_value = OGS_PFCP_CAUSE_SESSION_CONTEXT_NOT_FOUND;
+        ogs_pfcp_send_error_message(pfcp_xact, 0,
+                OGS_PFCP_SESSION_REPORT_RESPONSE_TYPE,
+                OGS_PFCP_CAUSE_SESSION_CONTEXT_NOT_FOUND, 0);
+        return false;
     }
 
     if (pfcp_req->report_type.presence == 0) {
         ogs_error("No Report Type");
-        cause_value = OGS_PFCP_CAUSE_MANDATORY_IE_MISSING;
-    }
-
-    if (cause_value != OGS_PFCP_CAUSE_REQUEST_ACCEPTED) {
         ogs_pfcp_send_error_message(pfcp_xact, 0,
                 OGS_PFCP_SESSION_REPORT_RESPONSE_TYPE,
-                cause_value, 0);
-        return cause_value;
+                OGS_PFCP_CAUSE_MANDATORY_IE_MISSING,
+                OGS_PFCP_REPORT_TYPE_TYPE);
+        return false;
     }
 
     ogs_assert(sess);
@@ -1645,7 +1677,7 @@ uint8_t smf_n4_handle_session_report_request(
                         ogs_pfcp_send_error_message(pfcp_xact, 0,
                                 OGS_PFCP_SESSION_REPORT_RESPONSE_TYPE,
                                 OGS_PFCP_CAUSE_SERVICE_NOT_SUPPORTED, 0);
-                        return OGS_PFCP_CAUSE_SERVICE_NOT_SUPPORTED;
+                        return false;
                     }
 
                     if (qfi) {
@@ -1655,7 +1687,7 @@ uint8_t smf_n4_handle_session_report_request(
                             ogs_pfcp_send_error_message(pfcp_xact, 0,
                                 OGS_PFCP_SESSION_REPORT_RESPONSE_TYPE,
                                 OGS_PFCP_CAUSE_SESSION_CONTEXT_NOT_FOUND, 0);
-                            return OGS_PFCP_CAUSE_SESSION_CONTEXT_NOT_FOUND;
+                            return false;
                         }
                     }
                 } else {
@@ -1664,23 +1696,37 @@ uint8_t smf_n4_handle_session_report_request(
             }
 
             if (pfcp_req->downlink_data_report.pdr_id.presence) {
-                pdr = ogs_pfcp_pdr_find(&sess->pfcp,
-                    pfcp_req->downlink_data_report.pdr_id.u16);
+                pdr_id = pfcp_req->downlink_data_report.pdr_id.u16;
+                pdr = ogs_pfcp_pdr_find(&sess->pfcp, pdr_id);
                 if (!pdr)
                     ogs_error("Cannot find the PDR-ID[%d]", pdr_id);
             } else {
                 ogs_error("No PDR-ID");
+                ogs_pfcp_send_error_message(pfcp_xact, 0,
+                        OGS_PFCP_SESSION_REPORT_RESPONSE_TYPE,
+                        OGS_PFCP_CAUSE_MANDATORY_IE_MISSING,
+                        OGS_PFCP_PDR_ID_TYPE);
+                return false;
             }
         } else {
+            /*
+             * TS 29.244 7.5.8.1: the Downlink Data Report IE is required
+             * when the Report Type indicates DLDR.
+             */
             ogs_error("No Downlink Data Report");
+            ogs_pfcp_send_error_message(pfcp_xact, 0,
+                    OGS_PFCP_SESSION_REPORT_RESPONSE_TYPE,
+                    OGS_PFCP_CAUSE_CONDITIONAL_IE_MISSING,
+                    OGS_PFCP_DOWNLINK_DATA_REPORT_TYPE);
+            return false;
         }
 
         if (!pdr) {
-            ogs_error("No Context");
+            ogs_error("Cannot find the PDR");
             ogs_pfcp_send_error_message(pfcp_xact, 0,
                     OGS_PFCP_SESSION_REPORT_RESPONSE_TYPE,
                     OGS_PFCP_CAUSE_SESSION_CONTEXT_NOT_FOUND, 0);
-            return OGS_PFCP_CAUSE_SESSION_CONTEXT_NOT_FOUND;
+            return false;
         }
 
         switch (sess->up_cnx_state) {
@@ -1766,13 +1812,12 @@ uint8_t smf_n4_handle_session_report_request(
             } else {
                 ogs_debug("[%s:%s] Rx PFCP report after Gy Final Unit Indication",
                           smf_ue->imsi_bcd, sess->session.name);
-                /* This effectively triggers session release: */
-                cause_value = OGS_PFCP_CAUSE_NO_RESOURCES_AVAILABLE;
+                release_session = true;
             }
             break;
         case -1:
             ogs_error("No Gy Diameter Peer");
-            cause_value = OGS_PFCP_CAUSE_NO_RESOURCES_AVAILABLE;
+            release_session = true;
             break;
         /* default: continue below */
         }
@@ -1814,6 +1859,7 @@ uint8_t smf_n4_handle_session_report_request(
              * still worked, but the UE could not originate a new VoLTE call
              * until it re-attached (airplane-mode toggle).
              */
+            linked_bearer = smf_default_bearer_in_sess(sess);
             ogs_list_for_each(&sess->bearer_list, bearer) {
                 if (bearer->dl_far == far)
                     break;
@@ -1822,13 +1868,27 @@ uint8_t smf_n4_handle_session_report_request(
                 ogs_error("[%s:%s] Error Indication from SGW-U: "
                         "no bearer found for FAR",
                     smf_ue->imsi_bcd, sess->session.name);
-            } else if (bearer == smf_default_bearer_in_sess(sess)) {
+            } else if (linked_bearer && linked_bearer->ei_deactivation) {
+        /*
+         * The default bearer represents the PDN connection, so releasing it
+         * deactivates every bearer of this session.  Whichever bearer this
+         * Error Indication refers to, the procedure is already running.
+         */
+                ogs_warn("[%s:%s] Ignore Error Indication from SGW-U "
+                        "[EBI:%d] : PDN deactivation already in progress",
+                    smf_ue->imsi_bcd, sess->session.name, bearer->ebi);
+            } else if (bearer->ei_deactivation) {
+                ogs_warn("[%s:%s] Ignore Error Indication from SGW-U "
+                        "[EBI:%d] : bearer deactivation already in progress",
+                    smf_ue->imsi_bcd, sess->session.name, bearer->ebi);
+            } else if (bearer == linked_bearer) {
                 ogs_error("[%s:%s] Error Indication from SGW-U "
                         "[EBI:%d] (default bearer)",
                     smf_ue->imsi_bcd, sess->session.name, bearer->ebi);
                 ogs_assert(OGS_OK ==
                     smf_epc_pfcp_send_deactivation(
                         sess, OGS_GTP2_CAUSE_REACTIVATION_REQUESTED));
+                bearer->ei_deactivation = true;
             } else {
                 ogs_error("[%s:%s] Error Indication from SGW-U "
                         "[EBI:%d] (dedicated bearer)",
@@ -1836,9 +1896,11 @@ uint8_t smf_n4_handle_session_report_request(
                 ogs_assert(OGS_OK ==
                     smf_epc_pfcp_send_one_bearer_modification_request(
                         bearer, OGS_INVALID_POOL_ID,
-                        OGS_PFCP_MODIFY_DL_ONLY|OGS_PFCP_MODIFY_DEACTIVATE,
+                        OGS_PFCP_MODIFY_DL_ONLY|OGS_PFCP_MODIFY_DEACTIVATE|
+                        OGS_PFCP_MODIFY_ERROR_INDICATION,
                         OGS_NAS_PROCEDURE_TRANSACTION_IDENTITY_UNASSIGNED,
                         OGS_GTP2_CAUSE_UNDEFINED_VALUE));
+                bearer->ei_deactivation = true;
             }
         } else {
             ogs_warn("[%s:%s] Error Indication from gNB",
@@ -1851,5 +1913,5 @@ uint8_t smf_n4_handle_session_report_request(
                     0, 0));
         }
     }
-    return cause_value;
+    return release_session;
 }
