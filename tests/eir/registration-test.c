@@ -24,24 +24,26 @@ typedef struct registration_case_s {
     const char *generic_status;
     const char *specific_status;
     bool other_supi;
-    uint8_t reject_cause;
+    uint8_t reject_policy_cause; /* 0: registration accepted */
+    uint8_t allow_policy_cause;
 } registration_case_t;
 
 static const registration_case_t registration_cases[] = {
-    { "whitelist registration", "WHITELISTED", NULL, false, 0 },
-    { "greylist registration", "GREYLISTED", NULL, false, 0 },
+    { "whitelist registration", "WHITELISTED", NULL, false, 0, 0 },
+    { "greylist registration", "GREYLISTED", NULL, false, 0, 0 },
     { "blacklist rejects registration", "BLACKLISTED", NULL, false,
-        OGS_5GMM_CAUSE_ILLEGAL_ME },
-    { "unknown equipment rejects registration", NULL, NULL, false,
-        OGS_5GMM_CAUSE_5GS_SERVICES_NOT_ALLOWED },
+        OGS_5GMM_CAUSE_ILLEGAL_ME, OGS_5GMM_CAUSE_ILLEGAL_ME },
+    { "unknown equipment follows policy", NULL, NULL, false,
+        OGS_5GMM_CAUSE_5GS_SERVICES_NOT_ALLOWED, 0 },
     { "specific blacklist overrides generic whitelist",
-        "WHITELISTED", "BLACKLISTED", false, OGS_5GMM_CAUSE_ILLEGAL_ME },
+        "WHITELISTED", "BLACKLISTED", false,
+        OGS_5GMM_CAUSE_ILLEGAL_ME, OGS_5GMM_CAUSE_ILLEGAL_ME },
     { "specific whitelist overrides generic blacklist",
-        "BLACKLISTED", "WHITELISTED", false, 0 },
+        "BLACKLISTED", "WHITELISTED", false, 0, 0 },
     { "different SUPI falls back to generic whitelist",
-        "WHITELISTED", "BLACKLISTED", true, 0 },
-    { "EIR server failure rejects registration", "INVALID", NULL, false,
-        OGS_5GMM_CAUSE_PAYLOAD_WAS_NOT_FORWARDED },
+        "WHITELISTED", "BLACKLISTED", true, 0, 0 },
+    { "EIR server failure follows policy", "INVALID", NULL, false,
+        OGS_5GMM_CAUSE_PAYLOAD_WAS_NOT_FORWARDED, 0 },
 };
 
 typedef struct registration_fixture_s {
@@ -50,29 +52,21 @@ typedef struct registration_fixture_s {
     unsigned int count;
 } registration_fixture_t;
 
-/* Refuse existing identities; the test must never replace another fixture. */
-static bool identity_unused(abts_case *tc, mongoc_collection_t *collection,
+/* Reset this test identity so interrupted runs do not affect the next case. */
+static bool clear_identity(abts_case *tc, mongoc_collection_t *collection,
         const char *key, const char *value)
 {
     bson_t *query = BCON_NEW(key, BCON_UTF8(value));
-    mongoc_cursor_t *cursor;
-    const bson_t *document;
     bson_error_t error;
-    bool found, failed;
+    bool removed;
 
     ogs_assert(query);
-    cursor = mongoc_collection_find_with_opts(collection, query, NULL, NULL);
-    ogs_assert(cursor);
-    found = mongoc_cursor_next(cursor, &document);
-    failed = mongoc_cursor_error(cursor, &error);
-    if (failed) {
+    removed = mongoc_collection_delete_many(
+            collection, query, NULL, NULL, &error);
+    if (!removed)
         ABTS_FAIL(tc, error.message);
-    } else if (found) {
-        ABTS_FAIL(tc, "EIR registration fixture identity already exists");
-    }
-    mongoc_cursor_destroy(cursor);
     bson_destroy(query);
-    return !failed && !found;
+    return removed;
 }
 
 /* Each document is removed by its owned _id, including after a failed step. */
@@ -119,8 +113,8 @@ static bool seed_registration(abts_case *tc, test_ue_t *ue, const char *pei,
     mongoc_collection_t *subscriber = ogs_mongoc()->collection.subscriber;
     mongoc_collection_t *eir = ogs_mongoc()->collection.eir;
 
-    if (!identity_unused(tc, subscriber, "imsi", ue->imsi) ||
-            !identity_unused(tc, eir, "pei", pei))
+    if (!clear_identity(tc, subscriber, "imsi", ue->imsi) ||
+            !clear_identity(tc, eir, "pei", pei))
         return false;
 
     ogs_hex_from_string(ue->k_string, ue->k, sizeof(ue->k));
@@ -199,6 +193,8 @@ static bool receive_ngap(abts_case *tc, ogs_socknode_t *ngap,
 static void registration_case(abts_case *tc, void *data)
 {
     const registration_case_t *test = data;
+    uint8_t expected_cause = test_eir_allow_policy() ?
+        test->allow_policy_cause : test->reject_policy_cause;
     unsigned int index = test - registration_cases;
     registration_fixture_t fixture = {0};
     ogs_nas_5gs_mobile_identity_suci_t suci;
@@ -267,12 +263,12 @@ static void registration_case(abts_case *tc, void *data)
     if (!send_nas(tc, ngap, ue, nas))
         goto cleanup;
 
-    if (test->reject_cause) {
+    if (expected_cause) {
         if (!receive_ngap(tc, ngap, ue,
                     NGAP_ProcedureCode_id_DownlinkNASTransport,
                     OGS_NAS_5GS_REGISTRATION_REJECT))
             goto cleanup;
-        ABTS_INT_EQUAL(tc, test->reject_cause, ue->registration_reject_cause);
+        ABTS_INT_EQUAL(tc, expected_cause, ue->registration_reject_cause);
     } else {
         if (!receive_ngap(tc, ngap, ue,
                     NGAP_ProcedureCode_id_InitialContextSetup,

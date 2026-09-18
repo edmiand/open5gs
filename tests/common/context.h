@@ -411,6 +411,7 @@ typedef struct test_ue_s {
     /* EPC: Last received message */
     S1AP_ProcedureCode_t s1ap_procedure_code;
     uint8_t emm_message_type;
+    ogs_nas_emm_cause_t attach_reject_cause;
     uint8_t esm_message_type;
 
     test_sess_t *sess;
@@ -478,6 +479,8 @@ typedef struct test_bearer_s {
 
     uint8_t         qfi;            /* 5GC */
     uint8_t         ebi;            /* EPC */
+
+    ogs_qos_t       qos;            /* 5GC : from NGAP QoS flow parameters */
 
     uint32_t        sgw_s1u_teid;   /* SGW-S1U TEID */
     ogs_ip_t        sgw_s1u_ip;     /* SGW-S1U IPv4/IPv6 */

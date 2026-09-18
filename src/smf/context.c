@@ -1184,8 +1184,10 @@ static int smf_ue_set_imsi(smf_ue_t *smf_ue, uint8_t *imsi, int imsi_len)
         return OGS_ERROR;
     }
 
-    memset(imsi_bcd, 0, sizeof(imsi_bcd));
-    ogs_buffer_to_bcd(imsi, imsi_len, imsi_bcd);
+    if (!ogs_buffer_to_bcd(imsi, imsi_len, imsi_bcd, sizeof(imsi_bcd))) {
+        ogs_error("Invalid IMSI [len:%d]", imsi_len);
+        return OGS_ERROR;
+    }
 
     if (smf_ue_set_imsi_bcd(smf_ue, imsi_bcd) != OGS_OK) {
         ogs_error("smf_ue_set_imsi_bcd() failed [%s]", imsi_bcd);
@@ -1274,8 +1276,10 @@ smf_ue_t *smf_ue_add_by_imsi(uint8_t *imsi, int imsi_len)
         return NULL;
     }
 
-    memset(imsi_bcd, 0, sizeof(imsi_bcd));
-    ogs_buffer_to_bcd(imsi, imsi_len, imsi_bcd);
+    if (!ogs_buffer_to_bcd(imsi, imsi_len, imsi_bcd, sizeof(imsi_bcd))) {
+        ogs_error("Invalid IMSI [len:%d]", imsi_len);
+        return NULL;
+    }
     if (ogs_imsi_bcd_is_valid(imsi_bcd) == false) {
         ogs_error("ogs_imsi_bcd_is_valid() failed [%s]", imsi_bcd);
         return NULL;
@@ -1532,6 +1536,7 @@ smf_sess_t *smf_sess_add_by_apn(smf_ue_t *smf_ue, char *apn, uint8_t rat_type)
 
     ogs_list_add(&smf_ue->sess_list, sess);
 
+    smf_metrics_inst_global_inc(SMF_METR_GLOB_GAUGE_PFCP_SESSIONS_ACTIVE);
     stats_add_smf_session();
 
     return sess;
@@ -1582,6 +1587,10 @@ smf_sess_t *smf_sess_add_by_gtp1_message(ogs_gtp1_message_t *message)
     }
     if (req->rat_type.presence == 0) {
         ogs_error("No RAT Type");
+        return NULL;
+    }
+    if (req->rat_type.u8 == 0) {
+        ogs_error("Invalid RAT Type [%d]", req->rat_type.u8);
         return NULL;
     }
 
@@ -1641,6 +1650,10 @@ smf_sess_t *smf_sess_add_by_gtp2_message(ogs_gtp2_message_t *message)
     }
     if (req->rat_type.presence == 0) {
         ogs_error("No RAT Type");
+        return NULL;
+    }
+    if (req->rat_type.u8 == 0) {
+        ogs_error("Invalid RAT Type [%d]", req->rat_type.u8);
         return NULL;
     }
 
@@ -2774,7 +2787,7 @@ void smf_sess_create_cp_up_data_forwarding(smf_sess_t *sess)
     ogs_assert(qos_flow);
     ogs_assert(ogs_list_next(qos_flow) == NULL);
 
-    /* We'll use the DL-FAR for CP2UP-FAR */
+    /* Share the default QoS flow/EPS bearer's DL FAR with CP2UP. */
     cp2up_far = qos_flow->dl_far;
     ogs_assert(cp2up_far);
     ogs_pfcp_pdr_associate_far(cp2up_pdr, cp2up_far);
@@ -2796,21 +2809,25 @@ void smf_sess_create_cp_up_data_forwarding(smf_sess_t *sess)
 
 #if 0
     /*
-     * MODIFIED the PDI matching for UP2CP
-     * to not distinguish the QoS Flow Identifier.
-     *
-     * When omitted, the UPF was also adjusted to not compare the QFI.
+     * UP2CP (RS): keep QFI matching disabled. The F-TEID and SDF filter
+     * still apply, but RS forwarding is not restricted to one QoS flow.
      */
-    if (qos_flow->qer && qos_flow->qfi) {
-        /* To match the PDI of UP2CP_PDR(from ff02::2/128 to assigned)
-         * Router-Solicitation has QFI in the Extended Header */
+    if (qos_flow->qer && qos_flow->qfi)
         up2cp_pdr->qfi = qos_flow->qfi;
-
-        /* When UPF sends router advertisement to gNB,
-         * it includes QFI in extension header */
-        ogs_pfcp_pdr_associate_qer(cp2up_pdr, qos_flow->qer);
-    }
 #endif
+
+    /*
+     * CP2UP (RA): in 5GC, use the default QoS flow's QER to add the
+     * DL PDU Session Container and QFI on N3 (TS 29.281, 5.2.2.7;
+     * TS 38.415, 5.5.2.1). This is output marking, not PDI matching;
+     * leave cp2up_pdr->qfi unset because SMF-to-UPF RAs have no QFI.
+     *
+     * EPC may also have a QER for bitrate control, but has no 5GS QFI.
+     * The guard below therefore leaves EPC RA forwarding unchanged,
+     * without adding a PDU Session Container.
+     */
+    if (qos_flow->qer && qos_flow->qfi)
+        ogs_pfcp_pdr_associate_qer(cp2up_pdr, qos_flow->qer);
 }
 
 void smf_sess_delete_cp_up_data_forwarding(smf_sess_t *sess)
@@ -3328,6 +3345,31 @@ static const uint8_t *ipcp_contains_option(
 #include "../version.h"
 static const char *pap_welcome = "Welcome to open5gs-smfd " OPEN5GS_VERSION;
 
+/*
+ * One request container can yield more than one response container
+ * (e.g. DNS server request -> primary + secondary), so the container cap
+ * that ogs_pco_parse() applies to the request does not bound the response.
+ */
+static bool smf_pco_id_add(
+        ogs_pco_t *pco, uint16_t id, uint8_t len, void *data)
+{
+    ogs_assert(pco);
+
+    if (pco->num_of_id >= OGS_MAX_NUM_OF_PROTOCOL_OR_CONTAINER_ID) {
+        ogs_error("PCO/EPCO response exceeds maximum number of containers "
+                "[id:0x%x max:%d]",
+                id, OGS_MAX_NUM_OF_PROTOCOL_OR_CONTAINER_ID);
+        return false;
+    }
+
+    pco->ids[pco->num_of_id].id = id;
+    pco->ids[pco->num_of_id].len = len;
+    pco->ids[pco->num_of_id].data = data;
+    pco->num_of_id++;
+
+    return true;
+}
+
 int smf_pco_build(uint8_t *pco_buf, uint8_t *buffer, int length)
 {
     int rv;
@@ -3366,6 +3408,10 @@ int smf_pco_build(uint8_t *pco_buf, uint8_t *buffer, int length)
         uint8_t *data = ue.ids[i].data;
         switch(ue.ids[i].id) {
         case OGS_PCO_ID_PASSWORD_AUTHENTICATION_PROTOCOL:
+            if (ue.ids[i].len < 2) {
+                ogs_error("Ignoring PAP container [len:%d]", ue.ids[i].len);
+                break;
+            }
             if (data[0] == 1) { /* Code : Authenticate-Request */
                 memset(&pco_pap, 0, sizeof(ogs_pco_pap_t));
 
@@ -3381,13 +3427,15 @@ int smf_pco_build(uint8_t *pco_buf, uint8_t *buffer, int length)
                 pco_pap.identifier = data[1]; /* Identifier */
                 pco_pap.len = htobe16(pco_size);
 
-                smf.ids[smf.num_of_id].id = ue.ids[i].id;
-                smf.ids[smf.num_of_id].len = pco_size;
-                smf.ids[smf.num_of_id].data = (uint8_t *)&pco_pap;
-                smf.num_of_id++;
+                smf_pco_id_add(&smf, ue.ids[i].id,
+                        pco_size, (uint8_t *)&pco_pap);
             }
             break;
         case OGS_PCO_ID_CHALLENGE_HANDSHAKE_AUTHENTICATION_PROTOCOL:
+            if (ue.ids[i].len < 2) {
+                ogs_error("Ignoring CHAP container [len:%d]", ue.ids[i].len);
+                break;
+            }
             if (data[0] == 2) { /* Code : Response */
                 memset(&pco_chap, 0, sizeof(ogs_pco_chap_t));
                 pco_size = 4; /* sizeof(code+identifier+len) */
@@ -3396,13 +3444,15 @@ int smf_pco_build(uint8_t *pco_buf, uint8_t *buffer, int length)
                 pco_chap.identifier = data[1]; /* Identifier */
                 pco_chap.len = htobe16(pco_size);
 
-                smf.ids[smf.num_of_id].id = ue.ids[i].id;
-                smf.ids[smf.num_of_id].len = pco_size;
-                smf.ids[smf.num_of_id].data = (uint8_t *)&pco_chap;
-                smf.num_of_id++;
+                smf_pco_id_add(&smf, ue.ids[i].id,
+                        pco_size, (uint8_t *)&pco_chap);
             }
             break;
         case OGS_PCO_ID_INTERNET_PROTOCOL_CONTROL_PROTOCOL:
+            if (ue.ids[i].len < 4) {
+                ogs_error("Ignoring IPCP container [len:%d]", ue.ids[i].len);
+                break;
+            }
             if (data[0] == 1) { /* Code : Configuration Request */
                 ogs_pco_ipcp_t *ipcp = (ogs_pco_ipcp_t *)data;
                 uint16_t in_len = 0;
@@ -3414,7 +3464,20 @@ int smf_pco_build(uint8_t *pco_buf, uint8_t *buffer, int length)
                 ogs_assert(ipcp);
                 in_len = be16toh(ipcp->len);
 
-                ogs_assert(num_of_ipcp <= OGS_PCO_MAX_NUM_OF_IPCP);
+                /* The IPCP packet length is attacker-controlled; keep the
+                 * option scan below within the enclosing container. */
+                if (in_len < 4 || in_len > ue.ids[i].len) {
+                    ogs_error("Ignoring IPCP container "
+                            "[packet:%d container:%d]", in_len, ue.ids[i].len);
+                    break;
+                }
+
+                if (num_of_ipcp >= OGS_PCO_MAX_NUM_OF_IPCP) {
+                    ogs_error("Ignoring IPCP container [max:%d]",
+                            OGS_PCO_MAX_NUM_OF_IPCP);
+                    break;
+                }
+
                 pco_ipcp[num_of_ipcp].code = 2; /* Code : Configuration Ack */
                 pco_ipcp[num_of_ipcp].identifier = ipcp->identifier; /* ID: Needs to match request */
 
@@ -3459,13 +3522,9 @@ int smf_pco_build(uint8_t *pco_buf, uint8_t *buffer, int length)
 
                 pco_ipcp[num_of_ipcp].len = htobe16(out_len);
 
-                smf.ids[smf.num_of_id].id = ue.ids[i].id;
-                smf.ids[smf.num_of_id].len = out_len;
-                smf.ids[smf.num_of_id].data = (uint8_t *)&pco_ipcp[num_of_ipcp];
-
-                num_of_ipcp++;
-
-                smf.num_of_id++;
+                if (smf_pco_id_add(&smf, ue.ids[i].id, out_len,
+                            (uint8_t *)&pco_ipcp[num_of_ipcp]))
+                    num_of_ipcp++;
             }
             break;
         case OGS_PCO_ID_DNS_SERVER_IPV4_ADDRESS_REQUEST:
@@ -3473,20 +3532,16 @@ int smf_pco_build(uint8_t *pco_buf, uint8_t *buffer, int length)
                 rv = ogs_ipsubnet(
                         &dns_primary, smf_self()->dns[0], NULL);
                 ogs_assert(rv == OGS_OK);
-                smf.ids[smf.num_of_id].id = ue.ids[i].id;
-                smf.ids[smf.num_of_id].len = OGS_IPV4_LEN;
-                smf.ids[smf.num_of_id].data = dns_primary.sub;
-                smf.num_of_id++;
+                smf_pco_id_add(&smf, ue.ids[i].id,
+                        OGS_IPV4_LEN, dns_primary.sub);
             }
 
             if (smf_self()->dns[1]) {
                 rv = ogs_ipsubnet(
                         &dns_secondary, smf_self()->dns[1], NULL);
                 ogs_assert(rv == OGS_OK);
-                smf.ids[smf.num_of_id].id = ue.ids[i].id;
-                smf.ids[smf.num_of_id].len = OGS_IPV4_LEN;
-                smf.ids[smf.num_of_id].data = dns_secondary.sub;
-                smf.num_of_id++;
+                smf_pco_id_add(&smf, ue.ids[i].id,
+                        OGS_IPV4_LEN, dns_secondary.sub);
             }
             break;
         case OGS_PCO_ID_DNS_SERVER_IPV6_ADDRESS_REQUEST:
@@ -3494,20 +3549,16 @@ int smf_pco_build(uint8_t *pco_buf, uint8_t *buffer, int length)
                 rv = ogs_ipsubnet(
                         &dns6_primary, smf_self()->dns6[0], NULL);
                 ogs_assert(rv == OGS_OK);
-                smf.ids[smf.num_of_id].id = ue.ids[i].id;
-                smf.ids[smf.num_of_id].len = OGS_IPV6_LEN;
-                smf.ids[smf.num_of_id].data = dns6_primary.sub;
-                smf.num_of_id++;
+                smf_pco_id_add(&smf, ue.ids[i].id,
+                        OGS_IPV6_LEN, dns6_primary.sub);
             }
 
             if (smf_self()->dns6[1]) {
                 rv = ogs_ipsubnet(
                         &dns6_secondary, smf_self()->dns6[1], NULL);
                 ogs_assert(rv == OGS_OK);
-                smf.ids[smf.num_of_id].id = ue.ids[i].id;
-                smf.ids[smf.num_of_id].len = OGS_IPV6_LEN;
-                smf.ids[smf.num_of_id].data = dns6_secondary.sub;
-                smf.num_of_id++;
+                smf_pco_id_add(&smf, ue.ids[i].id,
+                        OGS_IPV6_LEN, dns6_secondary.sub);
             }
             break;
         case OGS_PCO_ID_P_CSCF_IPV4_ADDRESS_REQUEST:
@@ -3515,13 +3566,11 @@ int smf_pco_build(uint8_t *pco_buf, uint8_t *buffer, int length)
                 rv = ogs_ipsubnet(&p_cscf,
                     smf_self()->p_cscf[smf_self()->p_cscf_index], NULL);
                 ogs_assert(rv == OGS_OK);
-                smf.ids[smf.num_of_id].id = ue.ids[i].id;
-                smf.ids[smf.num_of_id].len = OGS_IPV4_LEN;
-                smf.ids[smf.num_of_id].data = p_cscf.sub;
-                smf.num_of_id++;
-
-                smf_self()->p_cscf_index++;
-                smf_self()->p_cscf_index %= smf_self()->num_of_p_cscf;
+                if (smf_pco_id_add(&smf, ue.ids[i].id,
+                            OGS_IPV4_LEN, p_cscf.sub)) {
+                    smf_self()->p_cscf_index++;
+                    smf_self()->p_cscf_index %= smf_self()->num_of_p_cscf;
+                }
             }
             break;
         case OGS_PCO_ID_P_CSCF_IPV6_ADDRESS_REQUEST:
@@ -3529,22 +3578,17 @@ int smf_pco_build(uint8_t *pco_buf, uint8_t *buffer, int length)
                 rv = ogs_ipsubnet(&p_cscf6,
                     smf_self()->p_cscf6[smf_self()->p_cscf6_index], NULL);
                 ogs_assert(rv == OGS_OK);
-                smf.ids[smf.num_of_id].id = ue.ids[i].id;
-                smf.ids[smf.num_of_id].len = OGS_IPV6_LEN;
-                smf.ids[smf.num_of_id].data = p_cscf6.sub;
-                smf.num_of_id++;
-
-                smf_self()->p_cscf6_index++;
-                smf_self()->p_cscf6_index %= smf_self()->num_of_p_cscf6;
+                if (smf_pco_id_add(&smf, ue.ids[i].id,
+                            OGS_IPV6_LEN, p_cscf6.sub)) {
+                    smf_self()->p_cscf6_index++;
+                    smf_self()->p_cscf6_index %= smf_self()->num_of_p_cscf6;
+                }
             }
             break;
         case OGS_PCO_ID_IPV4_LINK_MTU_REQUEST:
             if (smf_self()->mtu) {
                 mtu = htobe16(smf_self()->mtu);
-                smf.ids[smf.num_of_id].id = ue.ids[i].id;
-                smf.ids[smf.num_of_id].len = sizeof(uint16_t);
-                smf.ids[smf.num_of_id].data = &mtu;
-                smf.num_of_id++;
+                smf_pco_id_add(&smf, ue.ids[i].id, sizeof(uint16_t), &mtu);
             }
             break;
         case OGS_PCO_ID_IP_ADDRESS_ALLOCATION_VIA_NAS_SIGNALLING:
@@ -3554,10 +3598,7 @@ int smf_pco_build(uint8_t *pco_buf, uint8_t *buffer, int length)
             /* TODO */
             break;
         case OGS_PCO_ID_MS_SUPPORT_LOCAL_ADDR_TFT_INDICATOR:
-            smf.ids[smf.num_of_id].id = ue.ids[i].id;
-            smf.ids[smf.num_of_id].len = 0;
-            smf.ids[smf.num_of_id].data = 0;
-            smf.num_of_id++;
+            smf_pco_id_add(&smf, ue.ids[i].id, 0, NULL);
             break;
         case OGS_PCO_ID_P_CSCF_RE_SELECTION_SUPPORT:
             /* TODO */

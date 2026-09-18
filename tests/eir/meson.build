@@ -1,17 +1,25 @@
 # Copyright (C) 2026 by Sukchan Lee <acetcom@gmail.com>
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-test_eir_integration_exe = executable('eir-integration',
+testapp_eir_exe = executable('eir',
     sources : files('''
         integration-main.c
         dbi-test.c
         service-test.c
         registration-test.c
+        attach-test.c
     '''.split()),
     c_args : testunit_core_cc_flags,
-    dependencies : [libtest5gc_dep, libcurl_dep])
+    dependencies : [libtestapp_dep, libcurl_dep])
 
-test('eir-integration', test_eir_integration_exe,
+test('eir', testapp_eir_exe,
+    env : ['OPEN5GS_EIR_TEST_POLICY=reject'],
     is_parallel : false,
     timeout : 180,
-    suite : ['eir', '5gc'])
+    suite : ['eir', 'app'])
+
+test('eir-allow', testapp_eir_exe,
+    env : ['OPEN5GS_EIR_TEST_POLICY=allow'],
+    is_parallel : false,
+    timeout : 180,
+    suite : ['eir', 'app'])

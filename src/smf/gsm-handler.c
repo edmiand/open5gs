@@ -257,6 +257,16 @@ int gsm_handle_pdu_session_modification_qos_rules(
         ogs_list_init(&qos_flow->pf_to_add_list);
 
         if (qos_rule[i].code == OGS_NAS_QOS_CODE_DELETE_EXISTING_QOS_RULE) {
+            /*
+             * Keep the default QoS flow for the PDU session lifetime.
+             * Use the stored flow rather than the UE-provided DQR bit.
+             */
+            if (qos_flow == smf_default_bearer_in_sess(sess)) {
+                ogs_error("[%s:%d] Cannot delete default QoS rule [QRI/QFI:%d]",
+                        smf_ue->supi, sess->psi, qos_rule[i].identifier);
+                return OGS_ERROR;
+            }
+
             smf_pf_remove_all(qos_flow);
 
             *pfcp_flags |= OGS_PFCP_MODIFY_REMOVE;
@@ -276,8 +286,22 @@ int gsm_handle_pdu_session_modification_qos_rules(
             for (j = 0; j < qos_rule[i].num_of_packet_filter &&
                         j < OGS_MAX_NUM_OF_FLOW_IN_NAS; j++) {
 
+                /*
+                 * The per-flow packet filter pool is limited to
+                 * OGS_MAX_NUM_OF_FLOW_IN_BEARER, but the UE can keep adding
+                 * packet filters to the same QoS flow -- either with several
+                 * rules in one request or with repeated requests -- since
+                 * "modify existing QoS rule and add packet filters" does not
+                 * remove the previous ones. Exhausting the pool is therefore
+                 * UE input, not an internal error: reject the request.
+                 */
                 pf = smf_pf_add(qos_flow);
-                ogs_assert(pf);
+                if (!pf) {
+                    ogs_error("[%s:%d] Overflow: PacketFilter in QoS flow "
+                            "[QRI/QFI:%d]",
+                            smf_ue->supi, sess->psi, qos_rule[i].identifier);
+                    return OGS_ERROR;
+                }
 
                 if (reconfigure_packet_filter(pf, &qos_rule[i], j) <= 0) {
                     ogs_error("[%s:%d] Invalid packet filter",
@@ -325,11 +349,16 @@ int gsm_handle_pdu_session_modification_qos_rules(
                     ogs_ipfw_copy_and_swap(&tmp, &pf->ipfw_rule);
                     pf->flow_description =
                         ogs_ipfw_encode_flow_description(&tmp);
-                    ogs_assert(pf->flow_description);
                 } else {
                     pf->flow_description =
                         ogs_ipfw_encode_flow_description(&pf->ipfw_rule);
-                    ogs_assert(pf->flow_description);
+                }
+
+                if (!pf->flow_description) {
+                    ogs_error("[%s:%d] Invalid packet filter [pf-direction=%d]",
+                            smf_ue->supi, sess->psi, pf->direction);
+                    smf_pf_remove(pf);
+                    return OGS_ERROR;
                 }
 
                 if (qos_rule[i].code ==
@@ -608,7 +637,7 @@ int gsm_handle_pdu_session_modification_request(
                     "[REMOVE combined with TFT/QOS-MODIFY "
                     "pfcp_flags:0x%llx]",
                     smf_ue->supi, sess->psi, (long long)pfcp_flags);
-            ogs_assert_if_reached();
+            goto cleanup;
         }
 
     } else if (pfcp_flags &

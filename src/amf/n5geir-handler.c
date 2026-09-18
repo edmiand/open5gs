@@ -20,13 +20,24 @@
 #include "n5geir-handler.h"
 #include "amf-sm.h"
 
+bool amf_n5geir_eic_check_wanted(const amf_ue_t *amf_ue)
+{
+    ogs_assert(amf_ue);
+
+    /* Registration that reached Security Mode Complete, except emergency. */
+    return amf_self()->eir.enabled &&
+        amf_ue->nas.message_type == OGS_NAS_5GS_REGISTRATION_REQUEST &&
+        amf_ue->nas.registration.value !=
+            OGS_NAS_5GS_REGISTRATION_TYPE_EMERGENCY;
+}
+
 /* The 5G-EIR gave no usable answer: reject as for any unreachable NF */
 ogs_nas_5gmm_cause_t amf_n5geir_eic_failure_cause(void)
 {
     ogs_warn("Applying 5G-EIR failure_action[%s]",
             amf_self()->eir.failure_action ==
-                AMF_EIR_ACTION_REJECT ? "reject" : "allow");
-    return amf_self()->eir.failure_action == AMF_EIR_ACTION_REJECT ?
+                OGS_EIR_ACTION_REJECT ? "reject" : "allow");
+    return amf_self()->eir.failure_action == OGS_EIR_ACTION_REJECT ?
         OGS_5GMM_CAUSE_PAYLOAD_WAS_NOT_FORWARDED :
         OGS_5GMM_CAUSE_REQUEST_ACCEPTED;
 }
@@ -45,8 +56,8 @@ ogs_nas_5gmm_cause_t amf_n5geir_eic_handle_equipment_status(
         ogs_info("[%s] Unknown equipment [%s] [unknown_action:%s]",
                 amf_ue->supi, amf_ue->pei,
                 amf_self()->eir.unknown_action ==
-                    AMF_EIR_ACTION_REJECT ? "reject" : "allow");
-        return amf_self()->eir.unknown_action == AMF_EIR_ACTION_REJECT ?
+                    OGS_EIR_ACTION_REJECT ? "reject" : "allow");
+        return amf_self()->eir.unknown_action == OGS_EIR_ACTION_REJECT ?
             OGS_5GMM_CAUSE_5GS_SERVICES_NOT_ALLOWED :
             OGS_5GMM_CAUSE_REQUEST_ACCEPTED;
     }

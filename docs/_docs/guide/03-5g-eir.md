@@ -103,7 +103,7 @@ That's it — restart the AMF, and blacklisted devices will now be rejected at r
 |---|---|---|---|
 | `unknown_action` | The device isn't in the `eir` collection at all | Let it register | Block it |
 | `failure_action` | The 5G-EIR can't be reached, times out, or returns an error | Let it register | Block it |
-| `missing_pei_action` | The AMF never got the device's PEI | Let it register | Block it |
+| `missing_pei_action` | The AMF has no usable PEI | Let it register | Block it |
 
 The safe starting point for most deployments is to leave everything on `allow`: a network hiccup or a device you simply haven't classified yet should never lock out real users. Switch a policy to `reject` only once you're confident your device inventory (and your EIR's uptime) is complete enough that "unknown" really should mean "not allowed here."
 
@@ -243,6 +243,67 @@ index, lookups may scan the collection, and runtime duplicate detection cannot
 prevent concurrent conflicting writes. Provisioning tools must also validate
 the supported PEI/SUPI formats described below.
 
-**Registration timing.** The check runs once per initial registration attempt, after NAS security is established and the device's PEI has been obtained, and before Registration Accept is sent. It does not run on Service Request.
+**Registration timing.** The AMF checks non-emergency registration after Security
+Mode Complete, including mobility/periodic registration and the inter-AMF path
+when they run Security Mode Control. Emergency registration and Service Request
+do not trigger the check. A registration that reuses a valid NAS security
+context and skips Security Mode Control also skips the check. An absent or
+unsupported PEI follows `missing_pei_action`. The MME checks non-emergency
+attach after Security Mode Complete; TAU remains outside its check scope.
 
-**Current limitations.** This implementation supports `imei-` (15 digits), `imeisv-` (16 digits), and IMSI-based SUPIs (`imsi-`, 6–15 digits). Matching uses the supplied PEI string exactly; IMEI and IMEISV are not normalized to the same device identity. GPSI-based lookup, other PEI/SUPI formats, and optional feature negotiation are not implemented. It does not include EPC/MME S13, Diameter EIR, CEIR federation, TAC-range/wildcard rules, bulk import, or a WebUI for managing `eir` records.
+**Current limitations.** This implementation supports `imei-` (15 digits), `imeisv-` (16 digits), and IMSI-based SUPIs (`imsi-`, 6–15 digits). Matching uses the supplied PEI string exactly; IMEI and IMEISV are not normalized to the same device identity. GPSI-based lookup, other PEI/SUPI formats, and optional feature negotiation are not implemented. It does not include CEIR federation, TAC-range/wildcard rules, bulk import, or a WebUI for managing `eir` records.
+
+## 7. EPC (4G): the same EIR over S13
+---
+
+`open5gs-eird` also answers the MME over S13 (Diameter, TS 29.272), so one
+`eir` collection serves both cores. S13 is disabled by default: uncomment
+`freeDiameter: /etc/freeDiameter/eir.conf` in `eir.yaml` to enable it
+(identity `eir.localdomain`, listening on `127.0.0.21`, MME peer
+`mme.localdomain`). An inline `freeDiameter:` mapping (identity, realm, listen_on,
+load_extension, connect) is accepted as well, as for the HSS. In an EPC-only
+deployment the `sbi:` section can be dropped entirely: with no SBI server the
+EIR serves S13 alone and never looks for an NRF or an SCP.
+
+On the MME side, enable the check in `mme.yaml` and let its freeDiameter
+configuration know the EIR peer:
+
+```yaml
+mme:
+  eir:
+    enabled: true
+    realm: localdomain
+    host: eir.localdomain
+    unknown_action: allow
+    failure_action: allow
+    missing_pei_action: allow
+```
+
+```
+# /etc/freeDiameter/mme.conf
+ConnectPeer = "eir.localdomain" { ConnectTo = "127.0.0.21"; No_TLS; };
+```
+
+The MME sends the IMEI (14 digits) and Software Version Number (2 digits) it
+received in Security Mode Complete; the EIR looks up `imeisv-<16 digits>`, so
+one record admits or blocks a device from both the AMF and the MME. The IMSI is
+sent in the optional User-Name AVP; without it only the records that have no
+`supi` apply. A request without Software-Version is looked up as `imei-<15 digits>` with the check
+digit computed. The verdicts follow the N5g-eir table: `WHITELISTED` and
+`GREYLISTED` attach, `BLACKLISTED` is rejected with EMM cause #6 (Illegal ME),
+an unknown device is answered with `DIAMETER_ERROR_EQUIPMENT_UNKNOWN` (5422)
+and follows `unknown_action` (#7), and any other failure follows
+`failure_action` (#17). As in the AMF, the check runs after Security Mode
+Complete, on attach only and never on an emergency attach; an attach that
+reuses a valid NAS security context skips SMC and therefore the check. Each
+eligible attach with a usable IMEISV queries the EIR; the MME keeps no cache
+of verdicts. An answer is used only if it still matches the pending attach
+and its serving S1 context. `tests/eir` exercises this path end to end.
+
+The Meson tests `eir` and `eir-allow` run the AMF and MME cases with matching
+`reject` and `allow` policies, respectively. Both runs reject blacklisted
+equipment; unknown equipment and EIR failures follow the selected policy.
+When running the test binary directly, set `OPEN5GS_EIR_TEST_POLICY=allow`
+to select the allow configuration and its expected results; the default is
+`reject`. The unit tests separately cover eligibility for registration and
+attach, including emergency procedures.

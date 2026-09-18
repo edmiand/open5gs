@@ -25,6 +25,55 @@
 
 #include "npcf-handler.h"
 
+/*
+ * Check PCC identifiers before replacing the current policy. NULL values
+ * represent removals and must have unique keys too. Keep the check bounded
+ * by the number of PCC rules the SMF can store.
+ */
+static bool validate_pcc_rule_ids(
+        OpenAPI_sm_policy_decision_t *SmPolicyDecision)
+{
+    OpenAPI_lnode_t *node = NULL;
+    const char *ids[OGS_MAX_NUM_OF_PCC_RULE];
+    int i, num_of_ids = 0;
+
+    ogs_assert(SmPolicyDecision);
+
+    OpenAPI_list_for_each(SmPolicyDecision->pcc_rules, node) {
+        OpenAPI_map_t *PccRuleMap = node->data;
+        OpenAPI_pcc_rule_t *PccRule = NULL;
+
+        if (num_of_ids >= OGS_MAX_NUM_OF_PCC_RULE) {
+            ogs_error("Too many PccRules [%d:%d]",
+                    num_of_ids + 1, OGS_MAX_NUM_OF_PCC_RULE);
+            return false;
+        }
+
+        if (!PccRuleMap || !PccRuleMap->key || !PccRuleMap->key[0]) {
+            ogs_error("No PccRule->id");
+            return false;
+        }
+
+        PccRule = PccRuleMap->value;
+        if (PccRule &&
+            (!PccRule->pcc_rule_id ||
+             strcmp(PccRuleMap->key, PccRule->pcc_rule_id) != 0)) {
+            ogs_error("Inconsistent PCC Rule Id [%s]", PccRuleMap->key);
+            return false;
+        }
+
+        for (i = 0; i < num_of_ids; i++) {
+            if (strcmp(ids[i], PccRuleMap->key) == 0) {
+                ogs_error("Duplicate PCC Rule Id [%s]", PccRuleMap->key);
+                return false;
+            }
+        }
+        ids[num_of_ids++] = PccRuleMap->key;
+    }
+
+    return true;
+}
+
 static void update_authorized_pcc_rule_and_qos(
         smf_sess_t *sess, OpenAPI_sm_policy_decision_t *SmPolicyDecision)
 {
@@ -367,6 +416,12 @@ bool smf_npcf_smpolicycontrol_handle_create(
         return false;
     }
 
+    if (!validate_pcc_rule_ids(SmPolicyDecision)) {
+        ogs_error("[%s:%d] Invalid PCC rule identifiers",
+                smf_ue->supi, sess->psi);
+        return false;
+    }
+
     memset(&header, 0, sizeof(header));
     header.uri = recvmsg->http.location;
 
@@ -594,6 +649,16 @@ bool smf_npcf_smpolicycontrol_handle_create(
                 &ul_pdr->ue_ip_addr, &ul_pdr->ue_ip_addr_len));
     }
 
+    /*
+     * Framed routes in the PDI (TS 29.244 Framed-Route / Framed-IPv6-Route)
+     *
+     * DL PDR: lets the UPF find this session for packets destined to the
+     * routed subnet. UL PDR: lets the UPF accept packets sourced from it.
+     * Only the default QoS flow's PDRs carry them. Requires FRRT in the
+     * UPF's UP Function Features. The PDR holds the RFC 2865/3162 wire
+     * string built from the CIDR in sess->session. The EPC path does the
+     * same in src/smf/gx-handler.c.
+     */
     if (sess->session.ipv4_framed_routes &&
         sess->pfcp_node->up_function_features.frrt) {
         int i = 0;
@@ -607,7 +672,7 @@ bool smf_npcf_smpolicycontrol_handle_create(
                                sizeof(dl_pdr->ipv4_framed_routes[0]));
                 ogs_assert(dl_pdr->ipv4_framed_routes);
             }
-            dl_pdr->ipv4_framed_routes[i] = ogs_strdup(route);
+            dl_pdr->ipv4_framed_routes[i] = ogs_framed_route_build(route);
 
             if (!ul_pdr->ipv4_framed_routes) {
                 ul_pdr->ipv4_framed_routes =
@@ -615,7 +680,7 @@ bool smf_npcf_smpolicycontrol_handle_create(
                                sizeof(ul_pdr->ipv4_framed_routes[0]));
                 ogs_assert(ul_pdr->ipv4_framed_routes);
             }
-            ul_pdr->ipv4_framed_routes[i] = ogs_strdup(route);
+            ul_pdr->ipv4_framed_routes[i] = ogs_framed_route_build(route);
         }
     }
 
@@ -632,7 +697,7 @@ bool smf_npcf_smpolicycontrol_handle_create(
                                sizeof(dl_pdr->ipv6_framed_routes[0]));
                 ogs_assert(dl_pdr->ipv6_framed_routes);
             }
-            dl_pdr->ipv6_framed_routes[i] = ogs_strdup(route);
+            dl_pdr->ipv6_framed_routes[i] = ogs_framed_route_build(route);
 
             if (!ul_pdr->ipv6_framed_routes) {
                 ul_pdr->ipv6_framed_routes =
@@ -640,7 +705,7 @@ bool smf_npcf_smpolicycontrol_handle_create(
                                sizeof(ul_pdr->ipv6_framed_routes[0]));
                 ogs_assert(ul_pdr->ipv6_framed_routes);
             }
-            ul_pdr->ipv6_framed_routes[i] = ogs_strdup(route);
+            ul_pdr->ipv6_framed_routes[i] = ogs_framed_route_build(route);
         }
     }
 
@@ -780,6 +845,12 @@ bool smf_npcf_smpolicycontrol_handle_update_notify(
     SmPolicyDecision = SmPolicyNotification->sm_policy_decision;
     if (!SmPolicyDecision) {
         strerror = ogs_msprintf("[%s:%d] No SmPolicyDecision",
+                smf_ue->supi, sess->psi);
+        goto cleanup;
+    }
+
+    if (!validate_pcc_rule_ids(SmPolicyDecision)) {
+        strerror = ogs_msprintf("[%s:%d] Invalid PCC rule identifiers",
                 smf_ue->supi, sess->psi);
         goto cleanup;
     }

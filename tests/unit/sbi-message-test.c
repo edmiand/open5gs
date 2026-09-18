@@ -721,6 +721,21 @@ static void sbi_message_test8(abts_case *tc, void *data)
 
 static void sbi_message_test9(abts_case *tc, void *data)
 {
+    static const struct {
+        const char *input;
+        const char *expected;
+    } cases[] = {
+        { "%41%2f%2F", "A//" },
+        { "%80%ff", "\200\377" },
+        /* OSS-Fuzz: a '%' without two hex digits is dropped. */
+        { "%\3770", "\3770" },
+        { "%-0", "-0" },
+        { "%0G", "0G" },
+        /* A truncated escape is dropped as before. */
+        { "%", "" },
+        { "%A", "A" },
+    };
+    size_t i;
     const char *original = "{\"sst\": 1, \"sd\": \"A08923\"}";
     char *encoded = ogs_sbi_url_encode(original);
     char *decoded = ogs_sbi_url_decode(encoded);
@@ -731,6 +746,12 @@ static void sbi_message_test9(abts_case *tc, void *data)
 
     ogs_free(encoded);
     ogs_free(decoded);
+
+    for (i = 0; i < OGS_ARRAY_SIZE(cases); i++) {
+        decoded = ogs_sbi_url_decode(cases[i].input);
+        ABTS_STR_EQUAL(tc, cases[i].expected, decoded);
+        ogs_free(decoded);
+    }
 }
 
 typedef struct multipart_parser_data_s {
@@ -1197,6 +1218,137 @@ static void sbi_message_test12(abts_case *tc, void *data)
     ogs_log_set_domain_level(id, level);
 }
 
+/* 5gAuthData preserves the selected object, string or explicit null value. */
+static void sbi_message_test13(abts_case *tc, void *data)
+{
+    const char *cases[] = {
+        ("{\"authType\":\"5G_AKA\",\"5gAuthData\":{"
+        "\"rand\":\"00112233445566778899aabbccddeeff\","
+        "\"hxresStar\":\"00112233445566778899aabbccddeeff\","
+        "\"autn\":\"00112233445566778899aabbccddeeff\"},\"_links\":{}}"),
+        ("{\"authType\":\"EAP_AKA_PRIME\","
+        "\"5gAuthData\":\"cGF5bG9hZA==\",\"_links\":{}}"),
+        "{\"authType\":\"EAP_AKA_PRIME\",\"5gAuthData\":null,\"_links\":{}}"
+    };
+    OpenAPI_ue_authentication_ctx_t *ctx, *copy;
+    OpenAPI_ue_authentication_ctx_5g_auth_data_t auth_data;
+    OpenAPI_av5g_aka_t av = {0};
+    cJSON *item, *encoded;
+    size_t i;
+    int id = ogs_log_get_domain_id("core");
+    ogs_log_level_e level = ogs_log_get_domain_level(id);
+
+    for (i = 0; i < OGS_ARRAY_SIZE(cases); i++) {
+        item = cJSON_Parse(cases[i]);
+        ABTS_PTR_NOTNULL(tc, item);
+        ctx = OpenAPI_ue_authentication_ctx_parseFromJSON(item);
+        ABTS_PTR_NOTNULL(tc, ctx);
+        if (ctx) {
+            ABTS_PTR_NOTNULL(tc, ctx->_5g_auth_data);
+            if (ctx->_5g_auth_data) {
+                ABTS_INT_EQUAL(tc, i == 0,
+                        ctx->_5g_auth_data->av5g_aka != NULL);
+                ABTS_INT_EQUAL(tc, i == 1,
+                        ctx->_5g_auth_data->eap_payload != NULL);
+                ABTS_INT_EQUAL(tc, i == 2,
+                        ctx->_5g_auth_data->is_eap_payload_null);
+            }
+            copy = OpenAPI_ue_authentication_ctx_copy(NULL, ctx);
+            ABTS_PTR_NOTNULL(tc, copy);
+            if (copy) {
+                encoded = OpenAPI_ue_authentication_ctx_convertToJSON(copy);
+                ABTS_PTR_NOTNULL(tc, encoded);
+                ABTS_TRUE(tc, cJSON_Compare(item, encoded, true));
+                cJSON_Delete(encoded);
+                OpenAPI_ue_authentication_ctx_free(copy);
+            }
+            OpenAPI_ue_authentication_ctx_free(ctx);
+        }
+        cJSON_Delete(item);
+    }
+
+    ogs_log_set_domain_level(id, OGS_LOG_NONE);
+    memset(&auth_data, 0, sizeof(auth_data));
+
+    /* No alternative selected. */
+    item = OpenAPI_ue_authentication_ctx_5g_auth_data_convertToJSON(&auth_data);
+    ABTS_TRUE(tc, item == NULL);
+    cJSON_Delete(item);
+
+    /* Both object and string alternatives selected. */
+    av.rand = av.hxres_star = av.autn = (char *)"00112233445566778899aabbccddeeff";
+    auth_data.av5g_aka = &av;
+    auth_data.eap_payload = (char *)"cGF5bG9hZA==";
+    item = OpenAPI_ue_authentication_ctx_5g_auth_data_convertToJSON(&auth_data);
+    ABTS_TRUE(tc, item == NULL);
+    cJSON_Delete(item);
+
+    /* Explicit null and a string value cannot both be selected. */
+    auth_data.av5g_aka = NULL;
+    auth_data.is_eap_payload_null = true;
+    item = OpenAPI_ue_authentication_ctx_5g_auth_data_convertToJSON(&auth_data);
+    ABTS_TRUE(tc, item == NULL);
+    cJSON_Delete(item);
+    ogs_log_set_domain_level(id, level);
+}
+
+static void sbi_message_test14(abts_case *tc, void *data)
+{
+    const struct {
+        const char *uri;
+        int expected;
+    } cases[] = {
+        /* URI from the CIFuzz input: 20 f7 3a 2f 2f 26. */
+        { "\xf7://&", OGS_ERROR },
+        /* Absolute URIs without a path must not start tokenization. */
+        { "http://localhost", OGS_ERROR },
+        { "https://localhost:7777", OGS_ERROR },
+        { "http://[::1]:7777", OGS_ERROR },
+        { "http://localhost?key=value", OGS_ERROR },
+        { "http://localhost#fragment", OGS_ERROR },
+        /* Empty paths and missing API versions are also invalid. */
+        { "", OGS_ERROR },
+        { "/", OGS_ERROR },
+        { "http://localhost/", OGS_ERROR },
+        { "/nnrf-nfm", OGS_ERROR },
+        /* Preserve relative/absolute URI parsing and percent decoding. */
+        { "/nnrf-nfm/v1/nf-instances", OGS_OK },
+        { "http://localhost/nnrf-nfm/v1/nf-instances", OGS_OK },
+        { "https://localhost:7777/nnrf-nfm/v1/nf-instances", OGS_OK },
+        { "http://[::1]:7777/nnrf-nfm/v1/nf-instances", OGS_OK },
+        { "/nnrf%2dnfm/v1/nf%2dinstances", OGS_OK },
+    };
+    ogs_sbi_header_t header;
+    ogs_sbi_message_t message;
+    int id = ogs_log_get_domain_id("sbi");
+    ogs_log_level_e level = ogs_log_get_domain_level(id);
+    int rv;
+    size_t i;
+
+    ogs_log_set_domain_level(id, OGS_LOG_NONE);
+    for (i = 0; i < OGS_ARRAY_SIZE(cases); i++) {
+        memset(&header, 0, sizeof(header));
+        header.method = ogs_strdup(OGS_SBI_HTTP_METHOD_GET);
+        header.uri = ogs_strdup(cases[i].uri);
+        ABTS_PTR_NOTNULL(tc, header.method);
+        ABTS_PTR_NOTNULL(tc, header.uri);
+
+        rv = ogs_sbi_parse_header(&message, &header);
+        ABTS_INT_EQUAL(tc, cases[i].expected, rv);
+        if (rv == OGS_OK) {
+            ABTS_STR_EQUAL(tc, "nnrf-nfm", message.h.service.name);
+            ABTS_STR_EQUAL(tc, "v1", message.h.api.version);
+            ABTS_STR_EQUAL(tc, "nf-instances",
+                    message.h.resource.component[0]);
+            ABTS_PTR_EQUAL(tc, NULL, message.h.resource.component[1]);
+        }
+
+        ogs_sbi_header_free(&header);
+        ogs_free(header.uri);
+    }
+    ogs_log_set_domain_level(id, level);
+}
+
 abts_suite *test_sbi_message(abts_suite *suite)
 {
     size_t i;
@@ -1225,6 +1377,8 @@ abts_suite *test_sbi_message(abts_suite *suite)
     abts_run_test(suite, eir_unknown_status, NULL);
     abts_run_test(suite, eir_problem_roundtrip, NULL);
     abts_run_test(suite, sbi_message_test12, NULL);
+    abts_run_test(suite, sbi_message_test13, NULL);
+    abts_run_test(suite, sbi_message_test14, NULL);
 
     return suite;
 }

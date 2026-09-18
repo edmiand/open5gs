@@ -6,6 +6,12 @@
 
 static char *eir_uri;
 static char *nrf_uri;
+static bool allow_policy;
+
+bool test_eir_allow_policy(void)
+{
+    return allow_policy;
+}
 
 const char *test_eir_sbi_uri(void)
 {
@@ -104,7 +110,7 @@ static void terminate(void)
 
     test_child_terminate();
     app_terminate();
-    test_5gc_final();
+    test_app_final();
 
     ogs_free(eir_uri);
     ogs_free(nrf_uri);
@@ -120,7 +126,7 @@ static void initialize(const char *const argv[])
     if (rv != OGS_OK)
         ogs_error("EIR integration application setup failed [error:%d]", rv);
     ogs_assert(rv == OGS_OK);
-    test_5gc_init();
+    test_app_init();
 
     eir_uri = config_sbi_uri("eir");
     nrf_uri = config_sbi_uri("nrf");
@@ -136,6 +142,16 @@ int main(int argc, const char *const argv[])
 {
     abts_suite *suite = NULL;
     CURLcode rv;
+    const char *policy = ogs_env_get("OPEN5GS_EIR_TEST_POLICY");
+
+    if (policy) {
+        if (!strcmp(policy, "allow"))
+            allow_policy = true;
+        else if (strcmp(policy, "reject")) {
+            fprintf(stderr, "Invalid EIR test policy: %s\n", policy);
+            return EXIT_FAILURE;
+        }
+    }
 
     rv = curl_global_init(CURL_GLOBAL_DEFAULT);
     if (rv != CURLE_OK) {
@@ -145,7 +161,8 @@ int main(int argc, const char *const argv[])
     }
 
     atexit(terminate);
-    test_app_run(argc, argv, "eir.yaml", initialize);
+    test_app_run(argc, argv,
+            allow_policy ? "eir-allow.yaml" : "eir.yaml", initialize);
 
     /* Discovery confirms that EIR registered its SBI service with the NRF. */
     if (!test_eir_wait_ready()) {
@@ -153,8 +170,11 @@ int main(int argc, const char *const argv[])
         return EXIT_FAILURE;
     }
 
-    suite = test_eir_dbi(suite);
-    suite = test_eir_service(suite);
+    if (!allow_policy) {
+        suite = test_eir_dbi(suite);
+        suite = test_eir_service(suite);
+    }
     suite = test_eir_registration(suite);
+    suite = test_eir_attach(suite);
     return abts_report(suite);
 }

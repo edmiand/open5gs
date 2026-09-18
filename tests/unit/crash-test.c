@@ -20,6 +20,8 @@
 #include "ogs-s1ap.h"
 #include "ogs-crypt.h"
 #include "core/abts.h"
+#include "mme/mme-context.h"
+#include "mme/sgsap-handler.h"
 
 static void test1_func(abts_case *tc, void *data)
 {

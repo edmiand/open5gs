@@ -79,6 +79,10 @@ int emm_handle_attach_request(enb_ue_t *enb_ue, mme_ue_t *mme_ue,
             sizeof(ogs_nas_eps_attach_type_t));
     mme_ue->nas_eps.type = MME_EPS_TYPE_ATTACH_REQUEST;
 
+    /* A new attach replaces the procedure an EIR answer may still be
+     * pending for */
+    mme_ue->eir_check_pending = false;
+
     ogs_debug("    ATTACH TYPE[%d] TSC[%d] KSI[%d] VALUE[%d]",
             mme_ue->nas_eps.type,
             mme_ue->nas_eps.attach.tsc,
@@ -987,10 +991,15 @@ int emm_handle_security_mode_complete(
              * IMEISV(16 digits) ==> 8bytes
              */
             if (imeisv->length == sizeof(ogs_nas_mobile_identity_imeisv_t)) {
+                if (ogs_nas_imeisv_to_bcd(&imeisv->imeisv, imeisv->length,
+                            mme_ue->imeisv_bcd) != OGS_OK) {
+                    ogs_error("[%s] Invalid IMEISV encoding", mme_ue->imsi_bcd);
+                    ogs_log_hexdump(OGS_LOG_ERROR,
+                            (unsigned char *)&imeisv->imeisv, imeisv->length);
+                    break;
+                }
                 memcpy(&mme_ue->nas_mobile_identity_imeisv,
                     &imeisv->imeisv, imeisv->length);
-                ogs_nas_imeisv_to_bcd(&imeisv->imeisv, imeisv->length,
-                        mme_ue->imeisv_bcd);
                 ogs_bcd_to_buffer(mme_ue->imeisv_bcd,
                         mme_ue->imeisv, &mme_ue->imeisv_len);
                 ogs_nas_imeisv_bcd_to_buffer(mme_ue->imeisv_bcd,
@@ -1005,7 +1014,7 @@ int emm_handle_security_mode_complete(
             }
             break;
         default:
-            ogs_warn("Invalid IMEISV Type[%d]", imeisv->imeisv.type);
+            ogs_error("Invalid IMEISV Type[%d]", imeisv->imeisv.type);
             break;
 
         }

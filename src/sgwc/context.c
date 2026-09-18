@@ -174,6 +174,18 @@ sgwc_ue_t *sgwc_ue_add_by_message(ogs_gtp2_message_t *message)
         return NULL;
     }
 
+    /* Validate the peer's IMSI before the hash lookup, whose key must be
+     * nonempty, and before removing any context selected by that key. */
+    if (req->imsi.len == 0 || req->imsi.len > OGS_MAX_IMSI_LEN) {
+        ogs_error("Invalid IMSI length [%u], expected [1..%d]",
+                req->imsi.len, OGS_MAX_IMSI_LEN);
+        return NULL;
+    }
+    if (!req->imsi.data) {
+        ogs_error("Missing IMSI data [len:%u]", req->imsi.len);
+        return NULL;
+    }
+
     ogs_trace("sgwc_ue_add_by_message() - IMSI ");
     ogs_log_hexdump(OGS_LOG_TRACE, req->imsi.data, req->imsi.len);
 
@@ -212,9 +224,21 @@ sgwc_ue_t *sgwc_ue_add_by_message(ogs_gtp2_message_t *message)
 sgwc_ue_t *sgwc_ue_add(uint8_t *imsi, int imsi_len)
 {
     sgwc_ue_t *sgwc_ue = NULL;
+    char imsi_bcd[OGS_MAX_IMSI_BCD_LEN+1];
 
     ogs_assert(imsi);
-    ogs_assert(imsi_len);
+
+    if (imsi_len <= 0 || imsi_len > OGS_MAX_IMSI_LEN) {
+        ogs_error("Invalid IMSI length [%d], expected [1..%d]",
+                imsi_len, OGS_MAX_IMSI_LEN);
+        return NULL;
+    }
+
+    /* Decode before allocating, so a malformed IMSI has nothing to unwind */
+    if (!ogs_buffer_to_bcd(imsi, imsi_len, imsi_bcd, sizeof(imsi_bcd))) {
+        ogs_error("Invalid IMSI [len:%d]", imsi_len);
+        return NULL;
+    }
 
     ogs_pool_id_calloc(&sgwc_ue_pool, &sgwc_ue);
     if (!sgwc_ue) {
@@ -233,9 +257,9 @@ sgwc_ue_t *sgwc_ue_add(uint8_t *imsi, int imsi_len)
             &sgwc_ue->sgw_s11_teid, sizeof(sgwc_ue->sgw_s11_teid), sgwc_ue);
 
     /* Set IMSI */
-    sgwc_ue->imsi_len = ogs_min(imsi_len, OGS_MAX_IMSI_LEN);
+    sgwc_ue->imsi_len = imsi_len;
     memcpy(sgwc_ue->imsi, imsi, sgwc_ue->imsi_len);
-    ogs_buffer_to_bcd(sgwc_ue->imsi, sgwc_ue->imsi_len, sgwc_ue->imsi_bcd);
+    ogs_cpystrn(sgwc_ue->imsi_bcd, imsi_bcd, sizeof(sgwc_ue->imsi_bcd));
 
     ogs_list_init(&sgwc_ue->sess_list);
 

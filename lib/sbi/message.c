@@ -1424,7 +1424,7 @@ int ogs_sbi_parse_header(ogs_sbi_message_t *message, ogs_sbi_header_t *header)
 
     if (p[0] != '/') {
         int rv = yuarel_parse(&yuarel, p);
-        if (rv != OGS_OK) {
+        if (rv != OGS_OK || !yuarel.path) {
             ogs_error("yuarel_parse() failed");
             ogs_free(uri);
             return OGS_ERROR;
@@ -1473,6 +1473,33 @@ void ogs_sbi_header_free(ogs_sbi_header_t *h)
     for (i = 0; i < OGS_SBI_MAX_NUM_OF_RESOURCE_COMPONENT &&
                         h->resource.component[i]; i++)
         ogs_free(h->resource.component[i]);
+}
+
+void ogs_sbi_header_set(ogs_hash_t *ht, const char *key, const char *val)
+{
+    char *old_val, *new_val, *new_key;
+    int keylen;
+
+    ogs_assert(ht);
+    ogs_assert(key);
+    ogs_assert(val);
+
+    keylen = strlen(key);
+    old_val = ogs_hash_get(ht, key, keylen);
+
+    /* The new value may refer to the value already stored in the hash. */
+    new_val = ogs_strdup(val);
+    ogs_assert(new_val);
+
+    if (old_val) {
+        /* The hash retains the original key when replacing a value. */
+        ogs_hash_set(ht, key, keylen, new_val);
+        ogs_free(old_val);
+    } else {
+        new_key = ogs_strdup(key);
+        ogs_assert(new_key);
+        ogs_hash_set(ht, new_key, keylen, new_val);
+    }
 }
 
 void ogs_sbi_http_hash_free(ogs_hash_t *hash)
@@ -3479,6 +3506,12 @@ static int parse_multipart(
 
     boundary = ogs_strndup(http->content+preamble, i-preamble);
     ogs_assert(boundary);
+
+    if (!boundary[0]) {
+        ogs_error("Empty multipart boundary");
+        ogs_free(boundary);
+        return OGS_ERROR;
+    }
 
     parser = multipart_parser_init(boundary, &settings);
     ogs_assert(parser);

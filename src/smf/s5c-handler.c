@@ -205,8 +205,11 @@ uint8_t smf_s5c_handle_create_session_request(
         smf_ue->msisdn_len = req->msisdn.len;
         if (smf_ue->msisdn_len > 0) {
             memcpy(smf_ue->msisdn, req->msisdn.data, smf_ue->msisdn_len);
-            ogs_buffer_to_bcd(
-                smf_ue->msisdn, smf_ue->msisdn_len, smf_ue->msisdn_bcd);
+            if (!ogs_buffer_to_bcd(smf_ue->msisdn, smf_ue->msisdn_len,
+                        smf_ue->msisdn_bcd, sizeof(smf_ue->msisdn_bcd))) {
+                ogs_error("Invalid MSISDN [len:%d]", smf_ue->msisdn_len);
+                return OGS_GTP2_CAUSE_MANDATORY_IE_INCORRECT;
+            }
         }
     }
 
@@ -219,13 +222,12 @@ uint8_t smf_s5c_handle_create_session_request(
 
     if (sess->gtp_rat_type == OGS_GTP2_RAT_TYPE_EUTRAN) {
         /* User Location Inforation is mandatory only for E-UTRAN */
-        ogs_assert(req->user_location_information.presence);
         if (req->user_location_information.presence == 0) {
             ogs_error("No User Location Information(ULI)");
             return OGS_GTP2_CAUSE_MANDATORY_IE_MISSING;
         }
         decoded = ogs_gtp2_parse_uli(&uli, &req->user_location_information);
-        if (req->user_location_information.len != decoded) {
+        if (decoded == 0 || req->user_location_information.len != decoded) {
             ogs_error("Invalid User Location Information(ULI)");
             return OGS_GTP2_CAUSE_MANDATORY_IE_INCORRECT;
         }
@@ -488,8 +490,11 @@ uint8_t smf_s5c_handle_create_session_request(
     if (req->msisdn.presence && req->msisdn.len && req->msisdn.data) {
         smf_ue->msisdn_len = ogs_min(req->msisdn.len, OGS_MAX_MSISDN_LEN);
         memcpy(smf_ue->msisdn, req->msisdn.data, smf_ue->msisdn_len);
-        ogs_buffer_to_bcd(smf_ue->msisdn,
-                smf_ue->msisdn_len, smf_ue->msisdn_bcd);
+        if (!ogs_buffer_to_bcd(smf_ue->msisdn, smf_ue->msisdn_len,
+                    smf_ue->msisdn_bcd, sizeof(smf_ue->msisdn_bcd))) {
+            ogs_error("Invalid MSISDN [len:%d]", smf_ue->msisdn_len);
+            return OGS_GTP2_CAUSE_MANDATORY_IE_INCORRECT;
+        }
     }
 
     /* Set IMEI(SV) */
@@ -497,8 +502,11 @@ uint8_t smf_s5c_handle_create_session_request(
         smf_ue->imeisv_len = ogs_min(req->me_identity.len, OGS_MAX_IMEISV_LEN);
         memcpy(smf_ue->imeisv,
             (uint8_t*)req->me_identity.data, smf_ue->imeisv_len);
-        ogs_buffer_to_bcd(
-            smf_ue->imeisv, smf_ue->imeisv_len, smf_ue->imeisv_bcd);
+        if (!ogs_buffer_to_bcd(smf_ue->imeisv, smf_ue->imeisv_len,
+                    smf_ue->imeisv_bcd, sizeof(smf_ue->imeisv_bcd))) {
+            ogs_error("Invalid IMEI(SV) [len:%d]", smf_ue->imeisv_len);
+            return OGS_GTP2_CAUSE_MANDATORY_IE_INCORRECT;
+        }
     }
 
     /* Set Node Identifier */
@@ -1452,11 +1460,19 @@ void smf_s5c_handle_bearer_resource_command(
                     ogs_ipfw_copy_and_swap(&tmp, &pf->ipfw_rule);
                     pf->flow_description =
                         ogs_ipfw_encode_flow_description(&tmp);
-                    ogs_assert(pf->flow_description);
                 } else {
                     pf->flow_description =
                         ogs_ipfw_encode_flow_description(&pf->ipfw_rule);
-                    ogs_assert(pf->flow_description);
+                }
+
+                if (!pf->flow_description) {
+                    ogs_error("Invalid packet filter [pf-direction=%d]",
+                            pf->direction);
+                    ogs_gtp2_send_error_message(
+                        xact, get_sender_f_teid(sess, sender_f_teid),
+                        OGS_GTP2_BEARER_RESOURCE_FAILURE_INDICATION_TYPE,
+                        OGS_GTP2_CAUSE_SEMANTIC_ERRORS_IN_PACKET_FILTER);
+                    return;
                 }
 
                 tft_update = 1;
@@ -1473,7 +1489,20 @@ void smf_s5c_handle_bearer_resource_command(
             pf = smf_pf_find_by_identifier(bearer, tft.pf[i].identifier+1);
             if (!pf)
                 pf = smf_pf_add(bearer);
-            ogs_assert(pf);
+            /*
+             * The per-bearer packet filter pool is limited to
+             * OGS_MAX_NUM_OF_FLOW_IN_BEARER. The UE can exceed it by adding
+             * packet filters that do not match an existing identifier,
+             * so this is UE input, not an internal error.
+             */
+            if (!pf) {
+                ogs_error("Overflow: PacketFilter in Bearer");
+                ogs_gtp2_send_error_message(
+                    xact, get_sender_f_teid(sess, sender_f_teid),
+                    OGS_GTP2_BEARER_RESOURCE_FAILURE_INDICATION_TYPE,
+                    OGS_GTP2_CAUSE_NO_RESOURCES_AVAILABLE);
+                return;
+            }
 
             if (reconfigure_packet_filter(pf, &tft, i) < 0) {
                 ogs_gtp2_send_error_message(
@@ -1522,11 +1551,19 @@ void smf_s5c_handle_bearer_resource_command(
                 ogs_ipfw_copy_and_swap(&tmp, &pf->ipfw_rule);
                 pf->flow_description =
                     ogs_ipfw_encode_flow_description(&tmp);
-                ogs_assert(pf->flow_description);
             } else {
                 pf->flow_description =
                     ogs_ipfw_encode_flow_description(&pf->ipfw_rule);
-                ogs_assert(pf->flow_description);
+            }
+
+            if (!pf->flow_description) {
+                ogs_error("Invalid packet filter [pf-direction=%d]",
+                        pf->direction);
+                ogs_gtp2_send_error_message(
+                    xact, get_sender_f_teid(sess, sender_f_teid),
+                    OGS_GTP2_BEARER_RESOURCE_FAILURE_INDICATION_TYPE,
+                    OGS_GTP2_CAUSE_SEMANTIC_ERRORS_IN_PACKET_FILTER);
+                return;
             }
 
             tft_update = 1;

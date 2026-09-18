@@ -25,7 +25,7 @@ static int parse_scheme_output(
         ogs_datum_t *ecckey, ogs_datum_t *cipher_text, uint8_t *mactag)
 {
     uint8_t protection_scheme_id;
-    uint8_t scheme_output_size;
+    size_t scheme_output_size;
     uint8_t *scheme_output = NULL;
     uint8_t *p = NULL;
 
@@ -35,9 +35,24 @@ static int parse_scheme_output(
     ogs_assert(mactag);
     ogs_assert(cipher_text);
 
+    protection_scheme_id = atoi(_protection_scheme_id);
+    if (protection_scheme_id == OGS_PROTECTION_SCHEME_PROFILE_A) {
+        ecckey->size = OGS_ECCKEY_LEN;
+    } else if (protection_scheme_id == OGS_PROTECTION_SCHEME_PROFILE_B) {
+        ecckey->size = OGS_ECCKEY_LEN+1;
+    } else {
+        ogs_fatal("Invalid protection scheme id [%s]", _protection_scheme_id);
+        ogs_assert_if_reached();
+
+        return OGS_ERROR;
+    }
+
+    cipher_text->size = OGS_MSIN_LEN;
+
     scheme_output_size = strlen(_scheme_output)/2;
-    if (scheme_output_size <= ((OGS_ECCKEY_LEN+1) + OGS_MACTAG_LEN)) {
-        ogs_error("Not enought length [%d]", (int)strlen(_scheme_output));
+    if (scheme_output_size <
+            ecckey->size + cipher_text->size + OGS_MACTAG_LEN) {
+        ogs_error("Not enough length [%zu]", strlen(_scheme_output));
         return OGS_ERROR;
     }
 
@@ -46,22 +61,6 @@ static int parse_scheme_output(
 
     ogs_ascii_to_hex(_scheme_output, strlen(_scheme_output),
             scheme_output, scheme_output_size);
-
-    protection_scheme_id = atoi(_protection_scheme_id);
-    if (protection_scheme_id == OGS_PROTECTION_SCHEME_PROFILE_A) {
-        ecckey->size = OGS_ECCKEY_LEN;
-    } else if (protection_scheme_id == OGS_PROTECTION_SCHEME_PROFILE_B) {
-        ecckey->size = OGS_ECCKEY_LEN+1;
-    } else {
-        ogs_free(scheme_output);
-
-        ogs_fatal("Invalid protection scheme id [%s]", _protection_scheme_id);
-        ogs_assert_if_reached();
-
-        return OGS_ERROR;
-    }
-
-    cipher_text->size = OGS_MSIN_LEN;
 
     p = scheme_output;
     ecckey->data = ogs_memdup(p, ecckey->size);
@@ -214,8 +213,8 @@ char *ogs_supi_from_suci(char *suci)
                     plain_bcd = ogs_calloc(1, plain_text.size*2+1);
                     ogs_assert(plain_bcd);
 
-                    ogs_buffer_to_bcd(
-                        plain_text.data, plain_text.size, plain_bcd);
+                    ogs_buffer_to_bcd(plain_text.data, plain_text.size,
+                        plain_bcd, plain_text.size*2+1);
 
                     supi = ogs_msprintf("imsi-%s%s%s",
                             array[2], array[3], plain_bcd);
@@ -492,7 +491,8 @@ char *ogs_sbi_url_decode(const char *str)
         ogs_assert(buf);
         while (*pstr) {
             if (*pstr == '%') {
-                if (pstr[1] && pstr[2]) {
+                if (isxdigit((unsigned char)pstr[1]) &&
+                        isxdigit((unsigned char)pstr[2])) {
                     *pbuf++ = ogs_from_hex(pstr[1]) << 4 |
                                 ogs_from_hex(pstr[2]);
                     pstr += 2;
@@ -757,7 +757,7 @@ uint64_t ogs_sbi_bitrate_from_string(char *str)
     END
 
     if (bitrate >= (INT64_MAX / mul))
-        bitrate = INT64_MAX;
+        return INT64_MAX;
     else
         bitrate *= mul;
 

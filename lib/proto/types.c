@@ -400,10 +400,18 @@ cleanup:
     return false;
 }
 
-static bool bcd_string_is_valid(
-        const char *bcd, int min_len, int max_len)
+bool ogs_bcd_string_is_valid_n(
+        const char *bcd, size_t len, int min_len, int max_len)
 {
-    size_t i, len = strlen(bcd);
+    size_t i;
+
+    ogs_assert(min_len > 0);
+    ogs_assert(max_len >= min_len);
+
+    if (!bcd) {
+        ogs_warn("Missing BCD string");
+        return false;
+    }
 
     if (len < (size_t)min_len || len > (size_t)max_len) {
         ogs_warn("Invalid BCD string length [%zu], expected [%d..%d]",
@@ -427,7 +435,7 @@ bool ogs_bcd_string_is_valid(const char *bcd, int max_len)
     ogs_assert(bcd);
     ogs_assert(max_len > 0);
 
-    return bcd_string_is_valid(bcd, 1, max_len);
+    return ogs_bcd_string_is_valid_n(bcd, strlen(bcd), 1, max_len);
 }
 
 bool ogs_id_bcd_is_valid(
@@ -450,7 +458,29 @@ bool ogs_id_bcd_is_valid(
         return false;
     }
 
-    return bcd_string_is_valid(str + type_len + 1, min_len, max_len);
+    str += type_len + 1;
+    return ogs_bcd_string_is_valid_n(str, strlen(str), min_len, max_len);
+}
+
+bool ogs_pei_is_valid(const char *pei)
+{
+    if (!pei) {
+        ogs_warn("Missing equipment identity");
+        return false;
+    }
+
+    if (!strncmp(pei, OGS_ID_PEI_TYPE_IMEI "-",
+                sizeof(OGS_ID_PEI_TYPE_IMEI "-") - 1))
+        return ogs_id_bcd_is_valid(pei, OGS_ID_PEI_TYPE_IMEI,
+                OGS_MAX_IMEI_BCD_LEN, OGS_MAX_IMEI_BCD_LEN);
+
+    if (!strncmp(pei, OGS_ID_SUPI_TYPE_IMEISV "-",
+                sizeof(OGS_ID_SUPI_TYPE_IMEISV "-") - 1))
+        return ogs_id_bcd_is_valid(pei, OGS_ID_SUPI_TYPE_IMEISV,
+                OGS_MAX_IMEISV_BCD_LEN, OGS_MAX_IMEISV_BCD_LEN);
+
+    ogs_warn("Unsupported PEI type; expected imei- or imeisv-");
+    return false;
 }
 
 bool ogs_pdu_session_id_is_valid(int psi)
@@ -544,6 +574,94 @@ ogs_uint24_t ogs_s_nssai_sd_from_string(const char *hex)
         return sd;
 
     return ogs_uint24_from_string_hexadecimal((char *)hex);
+}
+
+char *ogs_framed_route_build(const char *cidr)
+{
+    char *value = NULL;
+
+    ogs_assert(cidr);
+
+    /*
+     * RFC 2865 5.22 / RFC 3162 2.5: a gateway of 0.0.0.0 (or ::) means
+     * "use the user's own address"; Open5GS uses metric 1.
+     */
+    if (strchr(cidr, ':'))
+        value = ogs_msprintf("%s :: 1", cidr);
+    else
+        value = ogs_msprintf("%s 0.0.0.0 1", cidr);
+    ogs_assert(value);
+
+    return value;
+}
+
+char *ogs_framed_route_parse(const char *value, int length)
+{
+    const char *end = NULL;
+    char *cidr = NULL;
+
+    ogs_assert(value);
+
+    /* Prefix ends at the first space; gateway and metric are ignored. */
+    if (length > 0) {
+        end = memchr(value, ' ', length);
+        if (end)
+            length = end - value;
+    }
+
+    if (length <= 0) {
+        ogs_warn("Empty framed route prefix");
+        return NULL;
+    }
+
+    /* AVP/IE values are length-delimited, not NUL-terminated. */
+    if (memchr(value, '\0', length)) {
+        ogs_warn("NUL byte in framed route prefix");
+        return NULL;
+    }
+
+    cidr = ogs_strndup(value, length);
+    ogs_assert(cidr);
+
+    /*
+     * RFC 2865 5.22 defines classful defaults for IPv4 prefixes without
+     * a length. Validate the dotted-quad address before deriving one;
+     * there is no classful default for class D/E addresses.
+     * RFC 3162 2.5 also permits an omitted IPv6 prefix length, but does
+     * not define a default. Leave IPv6 prefixes unchanged; the caller
+     * interprets an omitted length and validates the resulting subnet.
+     */
+    if (!strchr(cidr, '/') && !strchr(cidr, ':')) {
+        ogs_sockaddr_t addr;
+        int first, bits;
+        char *classful = NULL;
+
+        if (ogs_inet_pton(AF_INET, cidr, &addr) != OGS_OK) {
+            ogs_warn("Invalid framed route IPv4 address [%s]", cidr);
+            ogs_free(cidr);
+            return NULL;
+        }
+
+        first = be32toh(addr.sin.sin_addr.s_addr) >> 24;
+        if (first < 128)
+            bits = 8;
+        else if (first < 192)
+            bits = 16;
+        else if (first < 224)
+            bits = 24;
+        else {
+            ogs_warn("No classful prefix length for IPv4 route [%s]", cidr);
+            ogs_free(cidr);
+            return NULL;
+        }
+
+        classful = ogs_msprintf("%s/%d", cidr, bits);
+        ogs_assert(classful);
+        ogs_free(cidr);
+        cidr = classful;
+    }
+
+    return cidr;
 }
 
 int ogs_fqdn_build(char *dst, const char *src, int length)
@@ -1344,4 +1462,38 @@ int ogs_pcc_rule_update_qos_from_media(
         pcc_rule->qos.gbr.uplink = pcc_rule->qos.mbr.uplink;
 
     return OGS_OK;
+}
+
+/* Returns true if any ARP field of the PCC rule was changed */
+bool ogs_pcc_rule_update_arp_from_media(
+        ogs_pcc_rule_t *pcc_rule, ogs_media_component_t *media_component)
+{
+    bool changed = false;
+
+    ogs_assert(pcc_rule);
+    ogs_assert(media_component);
+
+    if (media_component->arp.priority_level &&
+        media_component->arp.priority_level !=
+            pcc_rule->qos.arp.priority_level) {
+        pcc_rule->qos.arp.priority_level =
+            media_component->arp.priority_level;
+        changed = true;
+    }
+    if (media_component->arp.pre_emption_capability &&
+        media_component->arp.pre_emption_capability !=
+            pcc_rule->qos.arp.pre_emption_capability) {
+        pcc_rule->qos.arp.pre_emption_capability =
+            media_component->arp.pre_emption_capability;
+        changed = true;
+    }
+    if (media_component->arp.pre_emption_vulnerability &&
+        media_component->arp.pre_emption_vulnerability !=
+            pcc_rule->qos.arp.pre_emption_vulnerability) {
+        pcc_rule->qos.arp.pre_emption_vulnerability =
+            media_component->arp.pre_emption_vulnerability;
+        changed = true;
+    }
+
+    return changed;
 }
