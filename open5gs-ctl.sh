@@ -9,8 +9,6 @@ RUNDIR="$INSTALL_DIR/var/run/open5gs"
 
 # 5GC NFs in dependency order
 NFS_5GC=(nrf scp amf smf upf ausf udm pcf nssf bsf udr)
-# NFs that must run as root (need TUN/raw sockets)
-NFS_ROOT=(upf)
 
 # WebUI
 WEBUI_DIR="$SCRIPT_DIR/webui"
@@ -19,8 +17,6 @@ WEBUI_PORT=9999
 WEBUI_HOSTNAME=$(ip addr show | awk '/inet / && !/127\./ && !/ogstun/{gsub(/\/.*/, "", $2); print $2; exit}')
 
 # ── helpers ────────────────────────────────────────────────────────────────────
-
-needs_root() { local nf=$1; [[ " ${NFS_ROOT[*]} " == *" $nf "* ]]; }
 
 pidfile() { echo "$RUNDIR/$1.pid"; }
 
@@ -154,11 +150,7 @@ start_one() {
     # (see open5gs-upgrade.sh's health_check_all). Stderr goes to a separate
     # file instead: still useful for crashes that happen before the file
     # writer is registered, but it no longer pollutes the real log.
-    if needs_root "$nf"; then
-        sudo sh -c "\"$bin\" -D >> \"$LOGDIR/${nf}-stdout.log\" 2>&1"
-    else
-        "$bin" -D >> "$LOGDIR/${nf}-stdout.log" 2>&1
-    fi
+    "$bin" -D >> "$LOGDIR/${nf}-stdout.log" 2>&1
     sleep 1.5
 
     pid=$(get_pid "$nf")
@@ -180,11 +172,7 @@ stop_one() {
         return 0
     fi
 
-    if needs_root "$nf"; then
-        sudo kill "$pid" 2>/dev/null || true
-    else
-        kill "$pid" 2>/dev/null || true
-    fi
+    kill "$pid" 2>/dev/null || true
 
     local i=0
     while [[ -d /proc/$pid ]] && (( i < 20 )); do
@@ -192,7 +180,12 @@ stop_one() {
     done
     if [[ -d /proc/$pid ]]; then
         echo "  $nf: did not stop cleanly, sending SIGKILL"
-        needs_root "$nf" && sudo kill -9 "$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
+        kill -9 "$pid" 2>/dev/null || true
+        sleep 0.5
+        if [[ -d /proc/$pid ]]; then
+            echo "  $nf: FAILED to stop (pid $pid, owner $(stat -c '%U' /proc/$pid))" >&2
+            return 1
+        fi
     fi
 
     rm -f "$(pidfile "$nf")"
@@ -218,11 +211,7 @@ do_clear_logs() {
     for f in "$LOGDIR"/*.log; do
         [[ -f $f ]] || continue
         size_kb=$(du -k "$f" | cut -f1)
-        if [[ $(stat -c '%U' "$f") == "root" ]]; then
-            sudo truncate -s 0 "$f"
-        else
-            truncate -s 0 "$f"
-        fi
+        truncate -s 0 "$f"
         printf "  cleared %-16s (%d KB freed)\n" "$(basename "$f")" "$size_kb"
         total_freed=$(( total_freed + size_kb ))
     done
@@ -250,11 +239,7 @@ do_logs() {
         exit 1
     fi
 
-    # Root-owned logs (upf) are not readable by the normal user — tail via sudo then.
     local -a tail_cmd=(tail)
-    for f in "${files[@]}"; do
-        if [[ ! -r $f ]]; then tail_cmd=(sudo tail); break; fi
-    done
 
     # Deeper history when filtering, so recent matching events are included.
     local hist=50

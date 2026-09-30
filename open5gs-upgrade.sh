@@ -55,7 +55,7 @@ main() {
     [[ -d "$OPEN5GS_DIR/.git" ]] || die "Not a git checkout: $OPEN5GS_DIR"
 
     local NFS_ORDER=(nrf scp amf smf upf ausf udm pcf nssf bsf udr)
-    local NFS_ROOT=(upf)
+    local NFS_ROOT=()   # no NF needs root: ogstun is user-owned (see /usr/local/bin/open5gs-netconf.sh)
     # Also global — same reason as OPEN5GS_DIR/SHA_FILE above.
     CTL="$OPEN5GS_DIR/open5gs-ctl.sh"
     [[ -x "$CTL" ]] || die "Control script not found or not executable: $CTL"
