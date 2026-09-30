@@ -474,7 +474,17 @@ static int pcrf_gx_ccr_cb(struct msg **msg, struct avp *avp,
         ogs_paa_t *paa = NULL;
 
         ret = fd_msg_avp_hdr(avp, &hdr);
-        if (ret == 0 && hdr) {
+        if (ret == 0 && hdr && hdr->avp_value) {
+            if (!hdr->avp_value->os.data ||
+                    hdr->avp_value->os.len <
+                        (OGS_IPV6_DEFAULT_PREFIX_LEN >> 3) + 2) {
+                ogs_error("Invalid Framed-IPv6-Prefix length [%zu]",
+                        hdr->avp_value->os.len);
+                result_code = OGS_DIAM_INVALID_AVP_VALUE;
+                error_occurred = 1;
+                goto out;
+            }
+
             paa = (ogs_paa_t *)hdr->avp_value->os.data;
             if (paa && paa->len == OGS_IPV6_DEFAULT_PREFIX_LEN) {
                 if (sess_data->ipv6) {
@@ -633,6 +643,80 @@ static int pcrf_gx_ccr_cb(struct msg **msg, struct avp *avp,
         result_code = OGS_DIAM_UNKNOWN_SESSION_ID;
         error_occurred = 1;
         goto out;
+    }
+
+    /*
+     * Framed-Route / Framed-IPv6-Route (Open5GS extension)
+     *
+     * In EPC the PCRF is the only NF that can hand the subscriber's
+     * framed routes to the PGW-C, so they are sent here in the CCA.
+     * TS 29.212 does not define these AVPs for Gx. The value is the
+     * RFC 2865/3162 "<prefix> <gateway> <metric>" string, built from the
+     * CIDR stored in the database. Sent with the CCA-Initial only: the
+     * PGW-C stores them when the session is created (src/smf/gx-handler.c)
+     * and does not apply changes afterwards.
+     * See the comment on ogs_session_t in lib/proto/types.h.
+     */
+    if (cc_request_type == OGS_DIAM_GX_CC_REQUEST_TYPE_INITIAL_REQUEST) {
+        for (i = 0; i < OGS_MAX_NUM_OF_FRAMED_ROUTES_IN_PDI; i++) {
+            char *value = NULL;
+
+            if (!gx_message.session_data.session.ipv4_framed_routes ||
+                !gx_message.session_data.session.ipv4_framed_routes[i])
+                break;
+            value = ogs_framed_route_build(
+                    gx_message.session_data.session.ipv4_framed_routes[i]);
+
+            ret = fd_msg_avp_new(ogs_diam_gx_framed_route, 0, &avp);
+            if (ret != 0) {
+                ogs_error("Failed to create Framed-Route AVP");
+                ogs_free(value);
+                error_occurred = 1;
+                goto out;
+            }
+            val.os.data = (uint8_t *)value;
+            val.os.len = strlen(value);
+            ret = fd_msg_avp_setvalue(avp, &val);
+            if (ret != 0 ||
+                fd_msg_avp_add(ans, MSG_BRW_LAST_CHILD, avp) != 0) {
+                ogs_error("Failed to add Framed-Route AVP");
+                ogs_free(value);
+                error_occurred = 1;
+                goto out;
+            }
+            ogs_info("Gx CCA add Framed-Route: %s", value);
+            ogs_free(value);
+        }
+
+        for (i = 0; i < OGS_MAX_NUM_OF_FRAMED_ROUTES_IN_PDI; i++) {
+            char *value = NULL;
+
+            if (!gx_message.session_data.session.ipv6_framed_routes ||
+                !gx_message.session_data.session.ipv6_framed_routes[i])
+                break;
+            value = ogs_framed_route_build(
+                    gx_message.session_data.session.ipv6_framed_routes[i]);
+
+            ret = fd_msg_avp_new(ogs_diam_gx_framed_ipv6_route, 0, &avp);
+            if (ret != 0) {
+                ogs_error("Failed to create Framed-IPv6-Route AVP");
+                ogs_free(value);
+                error_occurred = 1;
+                goto out;
+            }
+            val.os.data = (uint8_t *)value;
+            val.os.len = strlen(value);
+            ret = fd_msg_avp_setvalue(avp, &val);
+            if (ret != 0 ||
+                fd_msg_avp_add(ans, MSG_BRW_LAST_CHILD, avp) != 0) {
+                ogs_error("Failed to add Framed-IPv6-Route AVP");
+                ogs_free(value);
+                error_occurred = 1;
+                goto out;
+            }
+            ogs_info("Gx CCA add Framed-IPv6-Route: %s", value);
+            ogs_free(value);
+        }
     }
 
     if (cc_request_type == OGS_DIAM_GX_CC_REQUEST_TYPE_INITIAL_REQUEST ||
@@ -998,6 +1082,9 @@ out:
         } else if (result_code == OGS_DIAM_UNKNOWN_SESSION_ID) {
             ret = fd_msg_rescode_set(ans,
                         (char *)"DIAMETER_UNKNOWN_SESSION_ID", NULL, NULL, 1);
+        } else if (result_code == OGS_DIAM_INVALID_AVP_VALUE) {
+            ret = fd_msg_rescode_set(ans,
+                        (char *)"DIAMETER_INVALID_AVP_VALUE", NULL, NULL, 1);
         } else if (result_code == OGS_DIAM_MISSING_AVP) {
             ret = fd_msg_rescode_set(ans,
                         (char *)"DIAMETER_MISSING_AVP", NULL, NULL, 1);

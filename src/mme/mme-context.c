@@ -29,8 +29,6 @@
 #include "mme-gtp-path.h"
 #include "mme-dns.h"
 
-#define MAX_CELL_PER_ENB            8
-
 static mme_context_t self;
 static ogs_diam_config_t g_diam_conf;
 
@@ -230,6 +228,11 @@ static int mme_context_prepare(void)
     self.dns.cache_ttl = 60;
     self.dns.guard_timeout = 3000;
 
+    self.eir.unknown_action     = OGS_EIR_ACTION_ALLOW;
+    self.eir.failure_action     = OGS_EIR_ACTION_ALLOW;
+    self.eir.missing_pei_action = OGS_EIR_ACTION_ALLOW;
+    self.eir.timeout            = 3;
+
     return OGS_OK;
 }
 
@@ -309,17 +312,21 @@ static int mme_context_validation(void)
                 ogs_app()->file);
         return OGS_ERROR;
     }
+    /* Zero omits optional NAS timer IEs; T3412 must be non-zero. */
     if (self.time.t3402.value && /* Optional */
         ogs_nas_gprs_timer_from_sec(&gprs_timer, self.time.t3402.value) !=
         OGS_OK) {
-        ogs_error("Not support GPRS Timer [%d]", (int)self.time.t3402.value);
+        ogs_error("Invalid mme.time.t3402.value `%lld` in '%s': "
+                "cannot encode as a NAS timer",
+                (long long)self.time.t3402.value, ogs_app()->file);
         return OGS_ERROR;
     }
     if (self.time.t3396.value && /* Optional */
         ogs_nas_gprs_timer_3_from_sec(&gprs_timer, self.time.t3396.value) !=
         OGS_OK) {
-        ogs_error("Not support GPRS Timer 3 [%d]",
-                (int)self.time.t3396.value);
+        ogs_error("Invalid mme.time.t3396.value `%lld` in '%s': "
+                "cannot encode as a NAS timer",
+                (long long)self.time.t3396.value, ogs_app()->file);
         return OGS_ERROR;
     }
     if (!self.time.t3412.value) { /* Mandatory */
@@ -329,15 +336,27 @@ static int mme_context_validation(void)
     }
     if (ogs_nas_gprs_timer_from_sec(&gprs_timer, self.time.t3412.value) !=
         OGS_OK) {
-        ogs_error("Not support GPRS Timer [%d]", (int)self.time.t3412.value);
+        ogs_error("Invalid mme.time.t3412.value `%lld` in '%s': "
+                "cannot encode as a NAS timer",
+                (long long)self.time.t3412.value, ogs_app()->file);
         return OGS_ERROR;
     }
     if (self.time.t3423.value && /* Optional */
         ogs_nas_gprs_timer_from_sec(&gprs_timer, self.time.t3423.value) !=
         OGS_OK) {
-        ogs_error("Not support GPRS Timer [%d]", (int)self.time.t3423.value);
+        ogs_error("Invalid mme.time.t3423.value `%lld` in '%s': "
+                "cannot encode as a NAS timer",
+                (long long)self.time.t3423.value, ogs_app()->file);
         return OGS_ERROR;
     }
+
+    if (self.eir.enabled && self.eir.realm == NULL) {
+        ogs_error("No mme.eir.realm in '%s'", ogs_app()->file);
+        return OGS_ERROR;
+    }
+    if (self.eir.enabled && self.eir.timeout == 0)
+        ogs_warn("mme.eir.timeout is 0: an unresponsive EIR will never "
+                 "trigger failure_action");
 
     return OGS_OK;
 }
@@ -2487,6 +2506,38 @@ int mme_context_parse_config(void)
                     }
                 } else if (!strcmp(mme_key, "mme_name")) {
                     self.mme_name = ogs_yaml_iter_value(&mme_iter);
+                } else if (!strcmp(mme_key, "eir")) {
+                    ogs_yaml_iter_t eir_iter;
+                    ogs_yaml_iter_recurse(&mme_iter, &eir_iter);
+
+                    while (ogs_yaml_iter_next(&eir_iter)) {
+                        const char *eir_key = ogs_yaml_iter_key(&eir_iter);
+                        ogs_assert(eir_key);
+                        if (!strcmp(eir_key, "enabled")) {
+                            self.eir.enabled =
+                                ogs_yaml_iter_bool(&eir_iter);
+                        } else if (!strcmp(eir_key, "host")) {
+                            self.eir.host = ogs_yaml_iter_value(&eir_iter);
+                        } else if (!strcmp(eir_key, "realm")) {
+                            self.eir.realm = ogs_yaml_iter_value(&eir_iter);
+                        } else if (!strcmp(eir_key, "timeout")) {
+                            const char *v = ogs_yaml_iter_value(&eir_iter);
+                            if (v) self.eir.timeout = atoi(v);
+                        } else if (!strcmp(eir_key, "unknown_action")) {
+                            rv = ogs_app_parse_eir_action(&eir_iter,
+                                    eir_key, &self.eir.unknown_action);
+                            if (rv != OGS_OK) return rv;
+                        } else if (!strcmp(eir_key, "failure_action")) {
+                            rv = ogs_app_parse_eir_action(&eir_iter,
+                                    eir_key, &self.eir.failure_action);
+                            if (rv != OGS_OK) return rv;
+                        } else if (!strcmp(eir_key, "missing_pei_action")) {
+                            rv = ogs_app_parse_eir_action(&eir_iter,
+                                    eir_key, &self.eir.missing_pei_action);
+                            if (rv != OGS_OK) return rv;
+                        } else
+                            ogs_warn("unknown key `%s`", eir_key);
+                    }
                 } else if (!strcmp(mme_key, "time")) {
                     ogs_yaml_iter_t time_iter;
                     ogs_yaml_iter_recurse(&mme_iter, &time_iter);
@@ -2494,69 +2545,25 @@ int mme_context_parse_config(void)
                         const char *time_key = ogs_yaml_iter_key(&time_iter);
                         ogs_assert(time_key);
                         if (!strcmp(time_key, "t3402")) {
-                            ogs_yaml_iter_t t3402_iter;
-                            ogs_yaml_iter_recurse(&time_iter, &t3402_iter);
-
-                            while (ogs_yaml_iter_next(&t3402_iter)) {
-                                const char *t3402_key =
-                                    ogs_yaml_iter_key(&t3402_iter);
-                                ogs_assert(t3402_key);
-
-                                if (!strcmp(t3402_key, "value")) {
-                                    const char *v = ogs_yaml_iter_value(&t3402_iter);
-                                    if (v)
-                                        self.time.t3402.value = atoll(v);
-                                } else
-                                    ogs_warn("unknown key `%s`", t3402_key);
-                            }
+                            rv = ogs_app_parse_timer_seconds("mme",
+                                    &time_iter, &self.time.t3402.value);
+                            if (rv != OGS_OK)
+                                return rv;
                         } else if (!strcmp(time_key, "t3396")) {
-                            ogs_yaml_iter_t t3396_iter;
-                            ogs_yaml_iter_recurse(&time_iter, &t3396_iter);
-
-                            while (ogs_yaml_iter_next(&t3396_iter)) {
-                                const char *t3396_key =
-                                    ogs_yaml_iter_key(&t3396_iter);
-                                ogs_assert(t3396_key);
-
-                                if (!strcmp(t3396_key, "value")) {
-                                    const char *v = ogs_yaml_iter_value(&t3396_iter);
-                                    if (v)
-                                        self.time.t3396.value = atoll(v);
-                                } else
-                                    ogs_warn("unknown key `%s`", t3396_key);
-                            }
+                            rv = ogs_app_parse_timer_seconds("mme",
+                                    &time_iter, &self.time.t3396.value);
+                            if (rv != OGS_OK)
+                                return rv;
                         } else if (!strcmp(time_key, "t3412")) {
-                            ogs_yaml_iter_t t3412_iter;
-                            ogs_yaml_iter_recurse(&time_iter, &t3412_iter);
-
-                            while (ogs_yaml_iter_next(&t3412_iter)) {
-                                const char *t3412_key =
-                                    ogs_yaml_iter_key(&t3412_iter);
-                                ogs_assert(t3412_key);
-
-                                if (!strcmp(t3412_key, "value")) {
-                                    const char *v = ogs_yaml_iter_value(&t3412_iter);
-                                    if (v)
-                                        self.time.t3412.value = atoll(v);
-                                } else
-                                    ogs_warn("unknown key `%s`", t3412_key);
-                            }
+                            rv = ogs_app_parse_timer_seconds("mme",
+                                    &time_iter, &self.time.t3412.value);
+                            if (rv != OGS_OK)
+                                return rv;
                         } else if (!strcmp(time_key, "t3423")) {
-                            ogs_yaml_iter_t t3423_iter;
-                            ogs_yaml_iter_recurse(&time_iter, &t3423_iter);
-
-                            while (ogs_yaml_iter_next(&t3423_iter)) {
-                                const char *t3423_key =
-                                    ogs_yaml_iter_key(&t3423_iter);
-                                ogs_assert(t3423_key);
-
-                                if (!strcmp(t3423_key, "value")) {
-                                    const char *v = ogs_yaml_iter_value(&t3423_iter);
-                                    if (v)
-                                        self.time.t3423.value = atoll(v);
-                                } else
-                                    ogs_warn("unknown key `%s`", t3423_key);
-                            }
+                            rv = ogs_app_parse_timer_seconds("mme",
+                                    &time_iter, &self.time.t3423.value);
+                            if (rv != OGS_OK)
+                                return rv;
                         } else if (!strcmp(time_key, "t3512")) {
                             /* handle config in amf */
                         } else if (!strcmp(time_key, "nf_instance")) {
@@ -3518,6 +3525,7 @@ void enb_ue_switch_to_enb(enb_ue_t *enb_ue, mme_enb_t *new_enb)
     ogs_assert(new_enb);
 
     enb = mme_enb_find_by_id(enb_ue->enb_id);
+    ogs_assert(enb);
 
     /* Remove from the old enb */
     ogs_list_remove(&enb->enb_ue_list, enb_ue);
@@ -4439,64 +4447,25 @@ int mme_ue_set_imsi(mme_ue_t *mme_ue, char *imsi_bcd,
                     old_mme_ue->ebi_bitmap,
                     ECM_CONNECTED(old_mme_ue) ? 1 : 0);
             if (ECM_CONNECTED(old_mme_ue)) {
-                enb_ue_t *enb_ue = enb_ue_find_by_id(old_mme_ue->enb_ue_id);
-                enb_ue_t *enb_ue_holding = NULL;
-
                 /*
                  * Keep the old S1 context until the new attach/TAU procedure
                  * is authenticated. CLEAR_S1_CONTEXT(mme_ue) will then send
                  * UEContextReleaseCommand to the old E-UTRAN context.
                  *
-                 * Do not use HOLDING_S1_CONTEXT(old_mme_ue) here: that macro
-                 * stores the holding id in old_mme_ue, but this function
-                 * removes old_mme_ue below after moving the session context
-                 * to the new mme_ue.
+                 * The hold is recorded in mme_ue rather than old_mme_ue,
+                 * which is removed below once its sessions have been moved
+                 * across.
                  */
                 ogs_warn("[%s] Holding old S1 context", mme_ue->imsi_bcd);
-                if (enb_ue) {
-                    int r;
+                HOLDING_S1_CONTEXT_FOR(mme_ue, old_mme_ue);
 
-                    enb_ue_holding =
-                        enb_ue_find_by_id(mme_ue->enb_ue_holding_id);
-                    if (enb_ue_holding) {
-                        ogs_error("[%s] Holding S1 context already exists",
-                                mme_ue->imsi_bcd);
-                        ogs_error("[%s]    ENB_UE_S1AP_ID[%d] "
-                                "MME_UE_S1AP_ID[%d]",
-                                mme_ue->imsi_bcd,
-                                enb_ue_holding->enb_ue_s1ap_id,
-                                enb_ue_holding->mme_ue_s1ap_id);
-                        r = s1ap_send_ue_context_release_command(
-                                enb_ue_holding,
-                                S1AP_Cause_PR_nas,
-                                S1AP_CauseNas_normal_release,
-                                S1AP_UE_CTX_REL_S1_CONTEXT_REMOVE, 0);
-                        ogs_expect(r == OGS_OK);
-                    } else if (mme_ue->enb_ue_holding_id !=
-                            OGS_INVALID_POOL_ID) {
-                        ogs_error("[%s] Holding S1 context has already "
-                                "been removed", mme_ue->imsi_bcd);
-                    }
-                    mme_ue->enb_ue_holding_id = OGS_INVALID_POOL_ID;
-
-                    enb_ue->mme_ue_id = OGS_INVALID_POOL_ID;
-
-                    ogs_warn("[%s]    ENB_UE_S1AP_ID[%d] MME_UE_S1AP_ID[%d]",
-                            old_mme_ue->imsi_bcd,
-                            enb_ue->enb_ue_s1ap_id,
-                            enb_ue->mme_ue_s1ap_id);
-
-                    enb_ue->ue_ctx_rel_action =
-                        S1AP_UE_CTX_REL_S1_CONTEXT_REMOVE;
-                    ogs_timer_start(enb_ue->t_s1_holding,
-                            mme_timer_cfg(MME_TIMER_S1_HOLDING)->duration);
-
-                    mme_ue->enb_ue_holding_id = old_mme_ue->enb_ue_id;
-                    old_mme_ue->enb_ue_id = OGS_INVALID_POOL_ID;
-                } else {
-                    ogs_error("[%s] S1 Context has already been removed",
-                                old_mme_ue->imsi_bcd);
-                }
+                /*
+                 * Unlike the ordinary callers, nothing associates a new S1
+                 * context with old_mme_ue after this, so clear it here
+                 * rather than in the macro. ECM_IDLE(old_mme_ue) has to
+                 * see the context as released.
+                 */
+                old_mme_ue->enb_ue_id = OGS_INVALID_POOL_ID;
             }
 
     /*

@@ -233,6 +233,8 @@ void ogs_sbi_message_free(ogs_sbi_message_t *message)
         OpenAPI_ue_reg_status_update_req_data_free(message->UeRegStatusUpdateReqData);
     if (message->UeRegStatusUpdateRspData)
         OpenAPI_ue_reg_status_update_rsp_data_free(message->UeRegStatusUpdateRspData);
+    if (message->EirResponseData)
+        OpenAPI_eir_response_data_free(message->EirResponseData);
     if (message->links) {
         OpenAPI_clear_and_free_string_list(message->links->items);
         if (message->links->self)
@@ -273,6 +275,23 @@ ogs_sbi_request_t *ogs_sbi_request_new(void)
     }
 
     return request;
+}
+
+ogs_sbi_request_t *ogs_sbi_request_new_incoming(void)
+{
+    int avail = ogs_pool_avail(&request_pool);
+    int reserve = ogs_app()->pool.xact;
+
+    /* Transactions retain their requests until removal. Reserve their
+     * capacity against incoming requests. */
+    if (avail <= reserve) {
+        ogs_error("SBI request capacity reserved for outbound traffic "
+                "[available:%d,reserved:%d,total:%d]",
+                avail, reserve, ogs_pool_size(&request_pool));
+        return NULL;
+    }
+
+    return ogs_sbi_request_new();
 }
 
 ogs_sbi_response_t *ogs_sbi_response_new(void)
@@ -774,6 +793,14 @@ ogs_sbi_request_t *ogs_sbi_build_request(ogs_sbi_message_t *message)
         ogs_sbi_header_set(request->http.params,
                 OGS_SBI_PARAM_IPV6PREFIX, message->param.ipv6prefix);
     }
+    if (message->param.pei) {
+        ogs_sbi_header_set(request->http.params,
+                OGS_SBI_PARAM_PEI, message->param.pei);
+    }
+    if (message->param.supi) {
+        ogs_sbi_header_set(request->http.params,
+                OGS_SBI_PARAM_SUPI, message->param.supi);
+    }
 
     if (message->param.home_plmn_id_presence) {
         OpenAPI_plmn_id_t home_plmn_id;
@@ -1238,6 +1265,10 @@ int ogs_sbi_parse_request(
             message->param.ipv4addr = ogs_hash_this_val(hi);
         } else if (!strcmp(ogs_hash_this_key(hi), OGS_SBI_PARAM_IPV6PREFIX)) {
             message->param.ipv6prefix = ogs_hash_this_val(hi);
+        } else if (!strcmp(ogs_hash_this_key(hi), OGS_SBI_PARAM_PEI)) {
+            message->param.pei = ogs_hash_this_val(hi);
+        } else if (!strcmp(ogs_hash_this_key(hi), OGS_SBI_PARAM_SUPI)) {
+            message->param.supi = ogs_hash_this_val(hi);
         } else if (!strcmp(ogs_hash_this_key(hi), OGS_SBI_PARAM_HOME_PLMN_ID)) {
             char *v = NULL;
             cJSON *item = NULL;
@@ -1393,7 +1424,7 @@ int ogs_sbi_parse_header(ogs_sbi_message_t *message, ogs_sbi_header_t *header)
 
     if (p[0] != '/') {
         int rv = yuarel_parse(&yuarel, p);
-        if (rv != OGS_OK) {
+        if (rv != OGS_OK || !yuarel.path) {
             ogs_error("yuarel_parse() failed");
             ogs_free(uri);
             return OGS_ERROR;
@@ -1442,6 +1473,33 @@ void ogs_sbi_header_free(ogs_sbi_header_t *h)
     for (i = 0; i < OGS_SBI_MAX_NUM_OF_RESOURCE_COMPONENT &&
                         h->resource.component[i]; i++)
         ogs_free(h->resource.component[i]);
+}
+
+void ogs_sbi_header_set(ogs_hash_t *ht, const char *key, const char *val)
+{
+    char *old_val, *new_val, *new_key;
+    int keylen;
+
+    ogs_assert(ht);
+    ogs_assert(key);
+    ogs_assert(val);
+
+    keylen = strlen(key);
+    old_val = ogs_hash_get(ht, key, keylen);
+
+    /* The new value may refer to the value already stored in the hash. */
+    new_val = ogs_strdup(val);
+    ogs_assert(new_val);
+
+    if (old_val) {
+        /* The hash retains the original key when replacing a value. */
+        ogs_hash_set(ht, key, keylen, new_val);
+        ogs_free(old_val);
+    } else {
+        new_key = ogs_strdup(key);
+        ogs_assert(new_key);
+        ogs_hash_set(ht, new_key, keylen, new_val);
+    }
 }
 
 void ogs_sbi_http_hash_free(ogs_hash_t *hash)
@@ -1753,6 +1811,10 @@ static char *build_json(ogs_sbi_message_t *message)
     } else if (message->UeRegStatusUpdateRspData) {
         item = OpenAPI_ue_reg_status_update_rsp_data_convertToJSON(
                 message->UeRegStatusUpdateRspData);
+        ogs_assert(item);
+    } else if (message->EirResponseData) {
+        item = OpenAPI_eir_response_data_convertToJSON(
+                message->EirResponseData);
         ogs_assert(item);
     }
 
@@ -2909,6 +2971,28 @@ static int parse_json(ogs_sbi_message_t *message,
             END
             break;
 
+        case OpenAPI_service_name_n5g_eir_eic:
+            SWITCH(message->h.resource.component[0])
+            CASE(OGS_SBI_RESOURCE_NAME_EQUIPMENT_STATUS)
+                if (message->res_status == OGS_SBI_HTTP_STATUS_OK) {
+                    message->EirResponseData =
+                        OpenAPI_eir_response_data_parseFromJSON(item);
+                    if (!message->EirResponseData) {
+                        rv = OGS_ERROR;
+                        ogs_error("JSON parse error");
+                    }
+                } else {
+                    ogs_error("HTTP ERROR Status : %d", message->res_status);
+                }
+                break;
+
+            DEFAULT
+                rv = OGS_ERROR;
+                ogs_error("Unknown resource name [%s]",
+                        message->h.resource.component[0]);
+            END
+            break;
+
         case OpenAPI_service_name_npcf_policyauthorization:
             SWITCH(message->h.resource.component[0])
             CASE(OGS_SBI_RESOURCE_NAME_APP_SESSIONS)
@@ -3274,12 +3358,27 @@ static int on_header_value(
 
     if (data->num_of_part < OGS_SBI_MAX_NUM_OF_PART && at && length) {
         if (!ogs_strcasecmp(data->header_field, OGS_SBI_CONTENT_TYPE)) {
-            ogs_assert(data->part[data->num_of_part].content_type == NULL);
+            /*
+             * A part carries at most one Content-Type. A repeated header
+             * comes from the peer, so treat it as a parse error rather than
+             * an assertion. See Issues #4775
+             */
+            if (data->part[data->num_of_part].content_type) {
+                ogs_error("Duplicate Content-Type in multipart part [%d]",
+                        data->num_of_part);
+                data->parse_error = true;
+                return 0;
+            }
             data->part[data->num_of_part].content_type =
                 ogs_strndup(at, length);
             ogs_assert(data->part[data->num_of_part].content_type);
         } else if (!ogs_strcasecmp(data->header_field, OGS_SBI_CONTENT_ID)) {
-            ogs_assert(data->part[data->num_of_part].content_id == NULL);
+            if (data->part[data->num_of_part].content_id) {
+                ogs_error("Duplicate Content-Id in multipart part [%d]",
+                        data->num_of_part);
+                data->parse_error = true;
+                return 0;
+            }
             data->part[data->num_of_part].content_id =
                 ogs_strndup(at, length);
             ogs_assert(data->part[data->num_of_part].content_id);
@@ -3407,6 +3506,12 @@ static int parse_multipart(
 
     boundary = ogs_strndup(http->content+preamble, i-preamble);
     ogs_assert(boundary);
+
+    if (!boundary[0]) {
+        ogs_error("Empty multipart boundary");
+        ogs_free(boundary);
+        return OGS_ERROR;
+    }
 
     parser = multipart_parser_init(boundary, &settings);
     ogs_assert(parser);

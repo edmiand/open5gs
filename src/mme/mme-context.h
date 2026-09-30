@@ -24,6 +24,7 @@
 
 #include "ogs-s1ap.h"
 #include "ogs-diameter-s6a.h"
+#include "ogs-diameter-s13.h"
 #include "ogs-gtp.h"
 #include "ogs-nas-eps.h"
 #include "ogs-app.h"
@@ -74,6 +75,24 @@ typedef struct served_gummei_s {
     int             num_of_mme_code;
     uint8_t         mme_code[CODE_PER_MME];
 } served_gummei_t;
+
+/* Control EIR (S13) functionality */
+typedef struct mme_eir_s {
+    bool enabled;
+    const char  *host;
+    const char  *realm;
+
+    /* Whitelisted and greylisted equipment is always allowed, blacklisted
+     * always rejected (no knob, as in the AMF). Only "unknown to the EIR"
+     * (DIAMETER_ERROR_EQUIPMENT_UNKNOWN) is operator policy. */
+    ogs_eir_action_e unknown_action;
+
+    uint32_t    timeout;             /* s, ECR answer deadline. On expiry
+                                       * failure_action applies. 0 = none */
+    ogs_eir_action_e failure_action;  /* No verdict: EIR unreachable, error
+                                       * answer, or no answer within timeout */
+    ogs_eir_action_e missing_pei_action; /* no usable IMEISV to check */
+} mme_eir_t;
 
 typedef struct mme_context_s {
     const char          *diam_conf_path;  /* MME Diameter conf path */
@@ -185,6 +204,7 @@ typedef struct mme_context_s {
     struct {
         const char *dnn;            /* Emergency APN */
     } emergency;
+    mme_eir_t eir;     /* Control EIR functionality */
 } mme_context_t;
 
 typedef struct mme_sgsn_route_s {
@@ -354,6 +374,22 @@ struct enb_ue_s {
 #define S1AP_UE_CTX_REL_S1_PAGING                           7
     uint8_t         ue_ctx_rel_action;
 
+/*
+ * An S1 context may outlive the procedure that created it. During
+ * handover the target enb_ue is linked to the mme_ue before the UE has
+ * moved, and it is only unlinked and removed when the eNB answers
+ * UEContextReleaseCommand with UEContextReleaseComplete.
+ *
+ * An eNB that owns such a context - for example a handover target after
+ * HandoverCancel - must not be able to drive UE/bearer procedures with
+ * it, since that would let it act on a UE that is still served by
+ * another eNB. Use this to require that the context is both the serving
+ * one and not already being released.
+ */
+#define ENB_UE_IS_SERVING(__mME, __eNB) \
+    ((__eNB)->id == (__mME)->enb_ue_id && \
+     (__eNB)->ue_ctx_rel_action == S1AP_UE_CTX_REL_INVALID_ACTION)
+
     bool            part_of_s1_reset_requested;
 
     /* Related Context */
@@ -508,6 +544,14 @@ struct mme_ue_s {
     int             masked_imeisv_len;
     char            imeisv_bcd[OGS_MAX_IMEISV_BCD_LEN+1];
     ogs_nas_mobile_identity_imeisv_t nas_mobile_identity_imeisv;
+
+    /*
+     * EIR (S13): ME identity check of the current attach. The id is
+     * carried by the ECR and must match on the answer, so that a late
+     * ECA of a cancelled or replaced procedure is ignored.
+     */
+    bool        eir_check_pending;
+    uint32_t    eir_check_id;
 
     uint8_t         msisdn[OGS_MAX_MSISDN_LEN];
     int             msisdn_len;
@@ -710,17 +754,33 @@ struct mme_ue_s {
       (enb_ue_find_by_id((__mME)->enb_ue_id) == NULL)))
     ogs_pool_id_t   enb_ue_id;
 
-#define HOLDING_S1_CONTEXT(__mME) \
+/*
+ * Put the S1 context __sERVING is using on hold, and record the hold in
+ * __hOLDER.
+ *
+ * __hOLDER and __sERVING are the same MME-UE context in the ordinary
+ * case, which HOLDING_S1_CONTEXT() below spells out. They differ only in
+ * mme_ue_set_imsi(), where the S1 context and the sessions still belong
+ * to the old MME-UE while the hold has to be recorded in the new one,
+ * because the old context is removed as soon as its sessions have been
+ * moved across.
+ *
+ * Each half of this names the UE after the context it is about: the S1
+ * context released on the way in is __hOLDER's, the one put on hold is
+ * __sERVING's. They are the same imsi_bcd unless the two differ.
+ */
+#define HOLDING_S1_CONTEXT_FOR(__hOLDER, __sERVING) \
     do { \
         enb_ue_t *enb_ue_holding = NULL; \
         \
-        enb_ue_holding = enb_ue_find_by_id((__mME)->enb_ue_holding_id); \
+        /* Whatever __hOLDER is already holding, named after __hOLDER */ \
+        enb_ue_holding = enb_ue_find_by_id((__hOLDER)->enb_ue_holding_id); \
         if (enb_ue_holding) { \
             int r; \
             ogs_warn("[%s] Holding S1 context already exists", \
-                    (__mME)->imsi_bcd); \
+                    (__hOLDER)->imsi_bcd); \
             ogs_warn("[%s]    ENB_UE_S1AP_ID[%d] MME_UE_S1AP_ID[%d]", \
-                    (__mME)->imsi_bcd, \
+                    (__hOLDER)->imsi_bcd, \
                     enb_ue_holding->enb_ue_s1ap_id, \
                     enb_ue_holding->mme_ue_s1ap_id); \
             r = s1ap_send_ue_context_release_command( \
@@ -728,19 +788,20 @@ struct mme_ue_s {
                     S1AP_Cause_PR_nas, S1AP_CauseNas_normal_release, \
                     S1AP_UE_CTX_REL_S1_CONTEXT_REMOVE, 0); \
             ogs_expect(r == OGS_OK); \
-        } else if ((__mME)->enb_ue_holding_id != OGS_INVALID_POOL_ID) { \
+        } else if ((__hOLDER)->enb_ue_holding_id != OGS_INVALID_POOL_ID) { \
             ogs_warn("[%s] Holding S1 context has already been removed", \
-                    (__mME)->imsi_bcd); \
+                    (__hOLDER)->imsi_bcd); \
         } \
-        (__mME)->enb_ue_holding_id = OGS_INVALID_POOL_ID; \
+        (__hOLDER)->enb_ue_holding_id = OGS_INVALID_POOL_ID; \
         \
-        enb_ue_holding = enb_ue_find_by_id((__mME)->enb_ue_id); \
+        /* The context being held is __sERVING's, and is named after it */ \
+        enb_ue_holding = enb_ue_find_by_id((__sERVING)->enb_ue_id); \
         if (enb_ue_holding) { \
             enb_ue_holding->mme_ue_id = OGS_INVALID_POOL_ID; \
             \
-            ogs_warn("[%s] Holding S1 Context", (__mME)->imsi_bcd); \
+            ogs_warn("[%s] Holding S1 Context", (__sERVING)->imsi_bcd); \
             ogs_warn("[%s]    ENB_UE_S1AP_ID[%d] MME_UE_S1AP_ID[%d]", \
-                    (__mME)->imsi_bcd, \
+                    (__sERVING)->imsi_bcd, \
                     enb_ue_holding->enb_ue_s1ap_id, \
                     enb_ue_holding->mme_ue_s1ap_id); \
             \
@@ -749,11 +810,13 @@ struct mme_ue_s {
             ogs_timer_start(enb_ue_holding->t_s1_holding, \
                     mme_timer_cfg(MME_TIMER_S1_HOLDING)->duration); \
             \
-            (__mME)->enb_ue_holding_id = (__mME)->enb_ue_id; \
+            (__hOLDER)->enb_ue_holding_id = (__sERVING)->enb_ue_id; \
         } else \
             ogs_error("[%s] S1 Context has already been removed", \
-                    (__mME)->imsi_bcd); \
+                    (__sERVING)->imsi_bcd); \
     } while(0)
+#define HOLDING_S1_CONTEXT(__mME) \
+    HOLDING_S1_CONTEXT_FOR((__mME), (__mME))
 #define CLEAR_S1_CONTEXT(__mME) \
     do { \
         enb_ue_t *enb_ue_holding = NULL; \

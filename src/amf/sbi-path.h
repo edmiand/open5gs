@@ -77,6 +77,7 @@ bool amf_sbi_send_request(
 #define AMF_UPDATE_SM_CONTEXT_HANDOVER_REQ_ACK          22
 #define AMF_UPDATE_SM_CONTEXT_HANDOVER_NOTIFY           23
 #define AMF_UPDATE_SM_CONTEXT_HANDOVER_CANCEL           24
+#define AMF_UPDATE_SM_CONTEXT_STALE_USER_PLANE          25
 #define AMF_RELEASE_SM_CONTEXT_NO_STATE                 31
 #define AMF_RELEASE_SM_CONTEXT_REGISTRATION_ACCEPT      33
 #define AMF_RELEASE_SM_CONTEXT_SERVICE_ACCEPT           34
@@ -98,6 +99,7 @@ int amf_ue_sbi_discover_and_send(
         ogs_sbi_discovery_option_t *discovery_option,
         ogs_sbi_request_t *(*build)(amf_ue_t *amf_ue, void *data),
         amf_ue_t *amf_ue, int state, void *data);
+int amf_ue_sbi_discover_and_send_eir(amf_ue_t *amf_ue);
 int amf_sess_sbi_discover_and_send(
         OpenAPI_service_name_e service_name,
         ogs_sbi_discovery_option_t *discovery_option,
@@ -117,6 +119,9 @@ void amf_sbi_send_deactivate_session(
 void amf_sbi_send_deactivate_all_sessions(
         ran_ue_t *ran_ue, amf_ue_t *amf_ue, int state, int group, int cause);
 void amf_sbi_send_deactivate_all_ue_in_gnb(amf_gnb_t *gnb, int state);
+
+/* Clean up after an NG context that was removed while held */
+void amf_sbi_send_deactivate_stale_user_plane(ran_ue_t *ran_ue);
 
 void amf_sbi_send_release_session(
         ran_ue_t *ran_ue, amf_sess_t *sess, int state, void *data);

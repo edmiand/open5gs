@@ -107,6 +107,25 @@ upf_context_t *upf_self(void)
     return &self;
 }
 
+static void upf_sess_clear_ue_ip(upf_sess_t *sess)
+{
+    ogs_assert(sess);
+
+    if (sess->ipv4) {
+        ogs_hash_unset_if_owner(self.ipv4_hash,
+                sess->ipv4->addr, OGS_IPV4_LEN, sess);
+        ogs_pfcp_ue_ip_free(sess->ipv4);
+        sess->ipv4 = NULL;
+    }
+    if (sess->ipv6) {
+        ogs_hash_unset_if_owner(self.ipv6_hash,
+                sess->ipv6->addr,
+                OGS_IPV6_DEFAULT_PREFIX_LEN >> 3, sess);
+        ogs_pfcp_ue_ip_free(sess->ipv6);
+        sess->ipv6 = NULL;
+    }
+}
+
 static int upf_context_prepare(void)
 {
     return OGS_OK;
@@ -232,15 +251,7 @@ int upf_sess_remove(upf_sess_t *sess)
     ogs_hash_set(self.smf_n4_f_seid_hash, &sess->smf_n4_f_seid,
             sizeof(sess->smf_n4_f_seid), NULL);
 
-    if (sess->ipv4) {
-        ogs_hash_set(self.ipv4_hash, sess->ipv4->addr, OGS_IPV4_LEN, NULL);
-        ogs_pfcp_ue_ip_free(sess->ipv4);
-    }
-    if (sess->ipv6) {
-        ogs_hash_set(self.ipv6_hash,
-                sess->ipv6->addr, OGS_IPV6_DEFAULT_PREFIX_LEN >> 3, NULL);
-        ogs_pfcp_ue_ip_free(sess->ipv6);
-    }
+    upf_sess_clear_ue_ip(sess);
 
     upf_sess_set_ue_ipv4_framed_routes(sess, NULL);
     upf_sess_set_ue_ipv6_framed_routes(sess, NULL);
@@ -393,10 +404,42 @@ upf_sess_t *upf_sess_add_by_message(ogs_pfcp_message_t *message)
     return sess;
 }
 
+/*
+ * Returns the session that already holds ue_ip under a different PFCP node,
+ * or NULL if sess may use it. A session of the same node may take over the
+ * address, e.g. when the SMF reassigns an address left by an orphaned session.
+ */
+static upf_sess_t *upf_sess_ue_ip_conflict(
+        upf_sess_t *sess, int family, ogs_pfcp_ue_ip_t *ue_ip)
+{
+    upf_sess_t *owner = NULL;
+
+    ogs_assert(sess);
+    ogs_assert(sess->pfcp_node);
+    ogs_assert(ue_ip);
+
+    if (family == AF_INET) {
+        owner = ogs_hash_get(
+                self.ipv4_hash, ue_ip->addr, OGS_IPV4_LEN);
+    } else if (family == AF_INET6) {
+        owner = ogs_hash_get(self.ipv6_hash, ue_ip->addr,
+                OGS_IPV6_DEFAULT_PREFIX_LEN >> 3);
+    } else {
+        ogs_assert_if_reached();
+        return NULL;
+    }
+
+    if (!owner || owner->pfcp_node == sess->pfcp_node)
+        return NULL;
+
+    return owner;
+}
+
 uint8_t upf_sess_set_ue_ip(upf_sess_t *sess,
         uint8_t session_type, ogs_pfcp_pdr_t *pdr)
 {
     ogs_pfcp_ue_ip_addr_t *ue_ip = NULL;
+    upf_sess_t *owner = NULL;
     char buf1[OGS_ADDRSTRLEN];
     char buf2[OGS_ADDRSTRLEN];
 
@@ -408,16 +451,7 @@ uint8_t upf_sess_set_ue_ip(upf_sess_t *sess,
     ue_ip = &pdr->ue_ip_addr;
     ogs_assert(ue_ip);
 
-    if (sess->ipv4) {
-        ogs_hash_set(self.ipv4_hash,
-                sess->ipv4->addr, OGS_IPV4_LEN, NULL);
-        ogs_pfcp_ue_ip_free(sess->ipv4);
-    }
-    if (sess->ipv6) {
-        ogs_hash_set(self.ipv6_hash,
-                sess->ipv6->addr, OGS_IPV6_DEFAULT_PREFIX_LEN >> 3, NULL);
-        ogs_pfcp_ue_ip_free(sess->ipv6);
-    }
+    upf_sess_clear_ue_ip(sess);
 
     /* Set PDN-Type and UE IP Address */
     if (session_type == OGS_PDU_SESSION_TYPE_IPV4) {
@@ -429,7 +463,19 @@ uint8_t upf_sess_set_ue_ip(upf_sess_t *sess,
                 ogs_assert(cause_value != OGS_PFCP_CAUSE_REQUEST_ACCEPTED);
                 return cause_value;
             }
-            ogs_hash_set(self.ipv4_hash, sess->ipv4->addr, OGS_IPV4_LEN, sess);
+            owner = upf_sess_ue_ip_conflict(sess, AF_INET, sess->ipv4);
+            if (owner) {
+                ogs_error("UE IPv4[%s] is owned by another PFCP node "
+                        "F-SEID[UP:0x%lx CP:0x%lx]",
+                        OGS_INET_NTOP(&sess->ipv4->addr, buf1),
+                        (long)owner->upf_n4_seid,
+                        (long)owner->smf_n4_f_seid.seid);
+                ogs_pfcp_ue_ip_free(sess->ipv4);
+                sess->ipv4 = NULL;
+                return OGS_PFCP_CAUSE_REQUEST_REJECTED;
+            }
+            ogs_hash_set(self.ipv4_hash,
+                    sess->ipv4->addr, OGS_IPV4_LEN, sess);
         } else {
             ogs_warn("Cannot support PDN-Type[%d], [IPv4:%d IPv6:%d DNN:%s]",
                 session_type, ue_ip->ipv4, ue_ip->ipv6,
@@ -443,6 +489,17 @@ uint8_t upf_sess_set_ue_ip(upf_sess_t *sess,
                 ogs_error("ogs_pfcp_ue_ip_alloc() failed[%d]", cause_value);
                 ogs_assert(cause_value != OGS_PFCP_CAUSE_REQUEST_ACCEPTED);
                 return cause_value;
+            }
+            owner = upf_sess_ue_ip_conflict(sess, AF_INET6, sess->ipv6);
+            if (owner) {
+                ogs_error("UE IPv6[%s] is owned by another PFCP node "
+                        "F-SEID[UP:0x%lx CP:0x%lx]",
+                        OGS_INET6_NTOP(&sess->ipv6->addr, buf2),
+                        (long)owner->upf_n4_seid,
+                        (long)owner->smf_n4_f_seid.seid);
+                ogs_pfcp_ue_ip_free(sess->ipv6);
+                sess->ipv6 = NULL;
+                return OGS_PFCP_CAUSE_REQUEST_REJECTED;
             }
             ogs_hash_set(self.ipv6_hash, sess->ipv6->addr,
                     OGS_IPV6_DEFAULT_PREFIX_LEN >> 3, sess);
@@ -460,7 +517,19 @@ uint8_t upf_sess_set_ue_ip(upf_sess_t *sess,
                 ogs_assert(cause_value != OGS_PFCP_CAUSE_REQUEST_ACCEPTED);
                 return cause_value;
             }
-            ogs_hash_set(self.ipv4_hash, sess->ipv4->addr, OGS_IPV4_LEN, sess);
+            owner = upf_sess_ue_ip_conflict(sess, AF_INET, sess->ipv4);
+            if (owner) {
+                ogs_error("UE IPv4[%s] is owned by another PFCP node "
+                        "F-SEID[UP:0x%lx CP:0x%lx]",
+                        OGS_INET_NTOP(&sess->ipv4->addr, buf1),
+                        (long)owner->upf_n4_seid,
+                        (long)owner->smf_n4_f_seid.seid);
+                ogs_pfcp_ue_ip_free(sess->ipv4);
+                sess->ipv4 = NULL;
+                return OGS_PFCP_CAUSE_REQUEST_REJECTED;
+            }
+            ogs_hash_set(self.ipv4_hash,
+                    sess->ipv4->addr, OGS_IPV4_LEN, sess);
         } else {
             ogs_warn("Cannot support PDN-Type[%d], [IPv4:%d IPv6:%d DNN:%s]",
                 session_type, ue_ip->ipv4, ue_ip->ipv6,
@@ -473,13 +542,21 @@ uint8_t upf_sess_set_ue_ip(upf_sess_t *sess,
             if (!sess->ipv6) {
                 ogs_error("ogs_pfcp_ue_ip_alloc() failed[%d]", cause_value);
                 ogs_assert(cause_value != OGS_PFCP_CAUSE_REQUEST_ACCEPTED);
-                if (sess->ipv4) {
-                    ogs_hash_set(self.ipv4_hash,
-                            sess->ipv4->addr, OGS_IPV4_LEN, NULL);
-                    ogs_pfcp_ue_ip_free(sess->ipv4);
-                    sess->ipv4 = NULL;
-                }
+                upf_sess_clear_ue_ip(sess);
                 return cause_value;
+            }
+            owner = upf_sess_ue_ip_conflict(sess, AF_INET6, sess->ipv6);
+            if (owner) {
+                ogs_error("UE IPv6[%s] is owned by another PFCP node "
+                        "F-SEID[UP:0x%lx CP:0x%lx]",
+                        OGS_INET6_NTOP(&sess->ipv6->addr, buf2),
+                        (long)owner->upf_n4_seid,
+                        (long)owner->smf_n4_f_seid.seid);
+                ogs_pfcp_ue_ip_free(sess->ipv6);
+                sess->ipv6 = NULL;
+                /* Release the IPv4 address installed above */
+                upf_sess_clear_ue_ip(sess);
+                return OGS_PFCP_CAUSE_REQUEST_REJECTED;
             }
             ogs_hash_set(self.ipv6_hash, sess->ipv6->addr,
                     OGS_IPV6_DEFAULT_PREFIX_LEN >> 3, sess);
@@ -584,12 +661,26 @@ static void add_framed_route_to_trie(ogs_ipsubnet_t *route, upf_sess_t *sess)
     }
 }
 
+/*
+ * The PFCP Framed-Route / Framed-IPv6-Route IE carries the RFC 2865/3162
+ * "<prefix> <gateway> <metric>" string (TS 29.244 8.2.109/8.2.111).
+ * ogs_framed_route_parse() drops gateway and metric and also accepts the
+ * plain CIDR that older Open5GS SMFs send. Only the prefix is used: the
+ * next hop for the subnet is always the UE itself. An empty or invalid
+ * prefix is an error like any other unparsable route; the caller logs
+ * and skips it. An IPv6 address without a length is left unchanged by
+ * the parser and interpreted as a host route by ogs_ipsubnet().
+ */
 static int parse_framed_route(ogs_ipsubnet_t *subnet, const char *framed_route)
 {
-    char *mask = ogs_strdup(framed_route);
-    char *addr = strsep(&mask, "/");
+    char *mask = ogs_framed_route_parse(framed_route, strlen(framed_route));
+    char *addr = NULL;
     int rv;
 
+    if (!mask)
+        return OGS_ERROR;
+
+    addr = strsep(&mask, "/");
     rv = ogs_ipsubnet(subnet, addr, mask);
     ogs_free(addr);
     return rv;
@@ -624,12 +715,14 @@ uint8_t upf_sess_set_ue_ipv4_framed_routes(upf_sess_t *sess,
         rv = parse_framed_route(&sess->ipv4_framed_routes[j], framed_routes[i]);
 
         if (rv != OGS_OK) {
-            ogs_warn("Ignoring invalid framed route %s", framed_routes[i]);
+            ogs_error("Ignoring invalid framed route %s", framed_routes[i]);
             memset(&sess->ipv4_framed_routes[j], 0,
                    sizeof(sess->ipv4_framed_routes[j]));
             continue;
         }
         add_framed_route_to_trie(&sess->ipv4_framed_routes[j], sess);
+        ogs_info("UPF registered IPv4 framed route[%s] for SEID[0x%lx]",
+                framed_routes[i], (long)sess->upf_n4_seid);
         j++;
     }
     if (j == 0 && sess->ipv4_framed_routes) {
@@ -667,12 +760,14 @@ uint8_t upf_sess_set_ue_ipv6_framed_routes(upf_sess_t *sess,
         rv = parse_framed_route(&sess->ipv6_framed_routes[j], framed_routes[i]);
 
         if (rv != OGS_OK) {
-            ogs_warn("Ignoring invalid framed route %s", framed_routes[i]);
+            ogs_error("Ignoring invalid framed route %s", framed_routes[i]);
             memset(&sess->ipv6_framed_routes[j], 0,
                    sizeof(sess->ipv6_framed_routes[j]));
             continue;
         }
         add_framed_route_to_trie(&sess->ipv6_framed_routes[j], sess);
+        ogs_info("UPF registered IPv6 framed route[%s] for SEID[0x%lx]",
+                framed_routes[i], (long)sess->upf_n4_seid);
         j++;
     }
     if (j == 0 && sess->ipv6_framed_routes) {
@@ -690,6 +785,13 @@ void upf_sess_urr_acc_add(upf_sess_t *sess, ogs_pfcp_urr_t *urr, size_t size, bo
 
     ogs_assert(urr->id > 0 && urr->id <= OGS_MAX_NUM_OF_URR);
     urr_acc = &sess->urr_acc[urr->id-1];
+
+    /* Without ISTM, start measurement and timers on the first packet. */
+    if (!urr_acc->measurement_started) {
+        ogs_debug("Start measurement on first packet for URR-ID[%u]",
+                urr->id);
+        upf_sess_urr_acc_timers_setup(sess, urr);
+    }
 
     /* Increment total & ul octets + pkts */
     urr_acc->total_octets += size;
@@ -716,8 +818,9 @@ void upf_sess_urr_acc_add(upf_sess_t *sess, ogs_pfcp_urr_t *urr, size_t size, bo
         report.num_of_usage_report = 1;
         upf_sess_urr_acc_snapshot(sess, urr);
 
-        ogs_assert(OGS_OK ==
-            upf_pfcp_send_session_report_request(sess, &report));
+        if (upf_pfcp_send_session_report_request(
+                    sess, &report) != OGS_OK)
+            ogs_error("PFCP Session Report Request failed");
         /* Start new report period/iteration: */
         upf_sess_urr_acc_timers_setup(sess, urr);
     }
@@ -729,24 +832,29 @@ void upf_sess_urr_acc_fill_usage_report(upf_sess_t *sess, const ogs_pfcp_urr_t *
                                   ogs_pfcp_user_plane_report_t *report, unsigned int idx)
 {
     upf_sess_urr_acc_t *urr_acc = NULL;
-    ogs_time_t last_report_timestamp;
-    ogs_time_t now;
+    ogs_time_t last_report_mono_timestamp;
+    ogs_time_t now, mono_now;
 
     ogs_assert(urr->id > 0 && urr->id <= OGS_MAX_NUM_OF_URR);
     urr_acc = &sess->urr_acc[urr->id-1];
 
     now = ogs_time_now(); /* we need UTC for start_time and end_time */
+    /* Elapsed time for Duration Measurement. */
+    mono_now = ogs_get_monotonic_time();
 
-    if (urr_acc->last_report.timestamp)
-        last_report_timestamp = urr_acc->last_report.timestamp;
+    if (urr_acc->last_report.mono_timestamp)
+        last_report_mono_timestamp = urr_acc->last_report.mono_timestamp;
     else
-        last_report_timestamp = ogs_time_from_ntp32(urr_acc->time_start);
+        last_report_mono_timestamp = urr_acc->mono_time_start;
 
     report->type.usage_report = 1;
     report->usage_report[idx].id = urr->id;
     report->usage_report[idx].seqn = urr_acc->report_seqn++;
-    report->usage_report[idx].start_time = urr_acc->time_start;
     report->usage_report[idx].end_time = ogs_time_to_ntp32(now);
+    /* Keep Start/End Time in an empty termination report. Without a
+     * measurement baseline, represent a zero-length interval at report time. */
+    report->usage_report[idx].start_time = urr_acc->measurement_started ?
+        urr_acc->time_start : report->usage_report[idx].end_time;
     report->usage_report[idx].vol_measurement = (ogs_pfcp_volume_measurement_t){
         .dlnop = 1,
         .ulnop = 1,
@@ -761,11 +869,19 @@ void upf_sess_urr_acc_fill_usage_report(upf_sess_t *sess, const ogs_pfcp_urr_t *
         .uplink_n_packets = urr_acc->ul_pkts - urr_acc->last_report.ul_pkts,
         .downlink_n_packets = urr_acc->dl_pkts - urr_acc->last_report.dl_pkts,
     };
-    if (now >= last_report_timestamp)
-        report->usage_report[idx].dur_measurement = ((now - last_report_timestamp) + (OGS_USEC_PER_SEC/2)) / OGS_USEC_PER_SEC; /* FIXME: should use MONOTONIC here */
+    /* Unsupported platforms use gettimeofday(); clamp clock rollback. */
+    if (urr_acc->measurement_started &&
+            mono_now >= last_report_mono_timestamp)
+        report->usage_report[idx].dur_measurement =
+            ((mono_now - last_report_mono_timestamp) +
+             (OGS_USEC_PER_SEC / 2)) / OGS_USEC_PER_SEC;
     /* else memset sets it to 0 */
-    report->usage_report[idx].time_of_first_packet = ogs_time_to_ntp32(urr_acc->time_of_first_packet); /* TODO: First since last report? */
-    report->usage_report[idx].time_of_last_packet = ogs_time_to_ntp32(urr_acc->time_of_last_packet);
+    if (urr_acc->time_of_first_packet)
+        report->usage_report[idx].time_of_first_packet =
+            ogs_time_to_ntp32(urr_acc->time_of_first_packet); /* TODO: First since last report? */
+    if (urr_acc->time_of_last_packet)
+        report->usage_report[idx].time_of_last_packet =
+            ogs_time_to_ntp32(urr_acc->time_of_last_packet);
 
     /* Time triggers: */
     if (urr->quota_validity_time > 0 &&
@@ -800,7 +916,8 @@ void upf_sess_urr_acc_snapshot(upf_sess_t *sess, ogs_pfcp_urr_t *urr)
     urr_acc->last_report.total_pkts = urr_acc->total_pkts;
     urr_acc->last_report.dl_pkts = urr_acc->dl_pkts;
     urr_acc->last_report.ul_pkts = urr_acc->ul_pkts;
-    urr_acc->last_report.timestamp = ogs_time_now();
+    if (urr_acc->measurement_started)
+        urr_acc->last_report.mono_timestamp = ogs_get_monotonic_time();
 }
 
 static void upf_sess_urr_acc_timers_cb(void *data)
@@ -810,7 +927,7 @@ static void upf_sess_urr_acc_timers_cb(void *data)
     ogs_pfcp_sess_t *pfcp_sess = urr->sess;
     upf_sess_t *sess = UPF_SESS(pfcp_sess);
 
-    ogs_info("upf_time_threshold_cb() triggered! urr=%p", urr);
+    ogs_debug("URR accounting timer expired: URR-ID[%u]", urr->id);
 
     if (urr->rep_triggers.quota_validity_time ||
         urr->rep_triggers.time_quota ||
@@ -820,8 +937,9 @@ static void upf_sess_urr_acc_timers_cb(void *data)
         report.num_of_usage_report = 1;
         upf_sess_urr_acc_snapshot(sess, urr);
 
-        ogs_assert(OGS_OK ==
-            upf_pfcp_send_session_report_request(sess, &report));
+        if (upf_pfcp_send_session_report_request(
+                    sess, &report) != OGS_OK)
+            ogs_error("PFCP Session Report Request failed");
     }
     /* Start new report period/iteration: */
     upf_sess_urr_acc_timers_setup(sess, urr);
@@ -834,7 +952,8 @@ static void upf_sess_urr_acc_validity_time_setup(upf_sess_t *sess, ogs_pfcp_urr_
     ogs_assert(urr->id > 0 && urr->id <= OGS_MAX_NUM_OF_URR);
     urr_acc = &sess->urr_acc[urr->id-1];
 
-    ogs_debug("Installing URR Quota Validity Time timer");
+    ogs_debug("Start URR Quota Validity Time timer [URR-ID:%u Seconds:%u]",
+            urr->id, urr->quota_validity_time);
     urr_acc->reporting_enabled = true;
     if (!urr_acc->t_validity_time)
         urr_acc->t_validity_time = ogs_timer_add(ogs_app()->timer_mgr,
@@ -850,7 +969,8 @@ static void upf_sess_urr_acc_time_quota_setup(upf_sess_t *sess, ogs_pfcp_urr_t *
     ogs_assert(urr->id > 0 && urr->id <= OGS_MAX_NUM_OF_URR);
     urr_acc = &sess->urr_acc[urr->id-1];
 
-    ogs_debug("Installing URR Time Quota timer");
+    ogs_debug("Start URR Time Quota timer [URR-ID:%u Seconds:%u]",
+            urr->id, urr->time_quota);
     urr_acc->reporting_enabled = true;
     if (!urr_acc->t_time_quota)
         urr_acc->t_time_quota = ogs_timer_add(ogs_app()->timer_mgr,
@@ -865,7 +985,8 @@ static void upf_sess_urr_acc_time_threshold_setup(upf_sess_t *sess, ogs_pfcp_urr
     ogs_assert(urr->id > 0 && urr->id <= OGS_MAX_NUM_OF_URR);
     urr_acc = &sess->urr_acc[urr->id-1];
 
-    ogs_debug("Installing URR Time Threshold timer");
+    ogs_debug("Start URR Time Threshold timer [URR-ID:%u Seconds:%u]",
+            urr->id, urr->time_threshold);
     urr_acc->reporting_enabled = true;
     if (!urr_acc->t_time_threshold)
         urr_acc->t_time_threshold = ogs_timer_add(ogs_app()->timer_mgr,
@@ -882,6 +1003,8 @@ void upf_sess_urr_acc_timers_setup(upf_sess_t *sess, ogs_pfcp_urr_t *urr)
     urr_acc = &sess->urr_acc[urr->id-1];
 
     urr_acc->time_start = ogs_time_ntp32_now();
+    urr_acc->mono_time_start = ogs_get_monotonic_time();
+    urr_acc->measurement_started = true;
     if (urr->rep_triggers.quota_validity_time && urr->quota_validity_time > 0)
         upf_sess_urr_acc_validity_time_setup(sess, urr);
     if (urr->rep_triggers.time_quota && urr->time_quota > 0)
@@ -890,21 +1013,31 @@ void upf_sess_urr_acc_timers_setup(upf_sess_t *sess, ogs_pfcp_urr_t *urr)
         upf_sess_urr_acc_time_threshold_setup(sess, urr);
 }
 
+void upf_sess_urr_acc_remove(upf_sess_t *sess, ogs_pfcp_urr_id_t urr_id)
+{
+    upf_sess_urr_acc_t *urr_acc = NULL;
+
+    ogs_assert(sess);
+    if (urr_id == 0 || urr_id > OGS_ARRAY_SIZE(sess->urr_acc)) {
+        ogs_warn("No accounting slot for URR-ID[%u]", urr_id);
+        return;
+    }
+    urr_acc = &sess->urr_acc[urr_id-1];
+
+    ogs_debug("Clear accounting and timers for URR-ID[%u]", urr_id);
+    if (urr_acc->t_time_threshold)
+        ogs_timer_delete(urr_acc->t_time_threshold);
+    if (urr_acc->t_validity_time)
+        ogs_timer_delete(urr_acc->t_validity_time);
+    if (urr_acc->t_time_quota)
+        ogs_timer_delete(urr_acc->t_time_quota);
+
+    memset(urr_acc, 0, sizeof(*urr_acc));
+}
+
 static void upf_sess_urr_acc_remove_all(upf_sess_t *sess)
 {
     unsigned int i;
-    for (i = 0; i < OGS_ARRAY_SIZE(sess->urr_acc); i++) {
-        if (sess->urr_acc[i].t_time_threshold) {
-            ogs_timer_delete(sess->urr_acc[i].t_time_threshold);
-            sess->urr_acc[i].t_time_threshold = NULL;
-        }
-        if (sess->urr_acc[i].t_validity_time) {
-            ogs_timer_delete(sess->urr_acc[i].t_validity_time);
-            sess->urr_acc[i].t_validity_time = NULL;
-        }
-        if (sess->urr_acc[i].t_time_quota) {
-            ogs_timer_delete(sess->urr_acc[i].t_time_quota);
-            sess->urr_acc[i].t_time_quota = NULL;
-        }
-    }
+    for (i = 0; i < OGS_ARRAY_SIZE(sess->urr_acc); i++)
+        upf_sess_urr_acc_remove(sess, i + 1);
 }

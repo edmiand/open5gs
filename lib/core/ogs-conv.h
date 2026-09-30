@@ -29,11 +29,24 @@ extern "C" {
 #endif
 
 int ogs_ascii_to_hex(char *in, int in_len, void *out, int out_len);
+/*
+ * Convert exactly out_len * 2 hexadecimal characters.
+ * Return OGS_OK on success. On error, leave out unchanged.
+ */
+int ogs_ascii_to_hex_checked(
+        const char *in, int in_len, void *out, int out_len);
 static ogs_inline void *ogs_hex_from_string(
         const char *str, void *out, int out_len)
 {
     ogs_ascii_to_hex((char*)str, strlen(str), out, out_len);
     return out;
+}
+static ogs_inline int ogs_hex_from_string_checked(
+        const char *str, void *out, int out_len)
+{
+    if (!str)
+        return OGS_ERROR;
+    return ogs_ascii_to_hex_checked(str, strlen(str), out, out_len);
 }
 
 void *ogs_hex_to_ascii(const void *in, int in_len, void *out, int out_len);
@@ -41,7 +54,8 @@ void *ogs_uint64_to_buffer(uint64_t num, int size, void *buffer);
 uint64_t ogs_buffer_to_uint64(void *buffer, int size);
 void *ogs_bcd_to_buffer(const char *in, void *out, int *out_len);
 void *ogs_bcd_to_buffer_reverse_order(const char *in, void *out, int *out_len);
-void *ogs_buffer_to_bcd(uint8_t *in, int in_len, void *out);
+void *ogs_buffer_to_bcd(const uint8_t *in, int in_len, void *out,
+        int out_len);
 
 char ogs_from_hex(char ch);
 char ogs_to_hex(char ch);

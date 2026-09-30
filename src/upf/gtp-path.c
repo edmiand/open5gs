@@ -243,8 +243,9 @@ static void _gtpv1_tun_recv_common_one(ogs_socket_t fd, ogs_pkbuf_t *recvbuf, bo
         if (pdr->qer && pdr->qer->qfi)
             report.downlink_data.qfi = pdr->qer->qfi; /* for 5GC */
 
-        ogs_assert(OGS_OK ==
-            upf_pfcp_send_session_report_request(sess, &report));
+        if (upf_pfcp_send_session_report_request(
+                    sess, &report) != OGS_OK)
+            ogs_error("PFCP Session Report Request failed");
     }
 
     /*
@@ -259,7 +260,8 @@ cleanup:
 
 static void _gtpv1_tun_recv_common_cb(short when, ogs_socket_t fd, bool has_eth, void *data)
 {
-    for (unsigned int i = 0; i < UPF_SK_DRAIN_BUDGET; i++) {
+    unsigned int i;
+    for (i = 0; i < UPF_SK_DRAIN_BUDGET; i++) {
         ogs_pkbuf_t *recvbuf = ogs_tun_read(fd, packet_pool);
         if (!recvbuf) /* EAGAIN, no more packets to process for now */
             return;
@@ -356,8 +358,9 @@ static void _gtpv1_u_recv_one(ogs_socket_t fd, ogs_sock_t *sock, ogs_pkbuf_t *pk
                 sess = UPF_SESS(far->sess);
                 ogs_assert(sess);
 
-                ogs_assert(OGS_OK ==
-                    upf_pfcp_send_session_report_request(sess, &report));
+                if (upf_pfcp_send_session_report_request(
+                            sess, &report) != OGS_OK)
+                    ogs_error("PFCP Session Report Request failed");
             }
 
         } else {
@@ -848,8 +851,9 @@ static void _gtpv1_u_recv_one(ogs_socket_t fd, ogs_sock_t *sock, ogs_pkbuf_t *pk
                             dl_report.downlink_data.qfi =
                                 dl_pdr->qer->qfi; /* for 5GC */
 
-                        ogs_assert(OGS_OK ==
-                            upf_pfcp_send_session_report_request(dl_sess, &dl_report));
+                        if (upf_pfcp_send_session_report_request(
+                                    dl_sess, &dl_report) != OGS_OK)
+                            ogs_error("PFCP Session Report Request failed");
                     }
 
                     /*
@@ -913,8 +917,9 @@ static void _gtpv1_u_recv_one(ogs_socket_t fd, ogs_sock_t *sock, ogs_pkbuf_t *pk
                 if (pdr->qer && pdr->qer->qfi)
                     report.downlink_data.qfi = pdr->qer->qfi; /* for 5GC */
 
-                ogs_assert(OGS_OK ==
-                    upf_pfcp_send_session_report_request(sess, &report));
+                if (upf_pfcp_send_session_report_request(
+                            sess, &report) != OGS_OK)
+                    ogs_error("PFCP Session Report Request failed");
             }
 
             /*
@@ -935,12 +940,13 @@ cleanup:
 static void _gtpv1_u_recv_cb(short when, ogs_socket_t fd, void *data)
 {
     ogs_sock_t *sock = NULL;
+    unsigned int i;
 
     ogs_assert(fd != INVALID_SOCKET);
     sock = data;
     ogs_assert(sock);
 
-    for (unsigned int i = 0; i < UPF_SK_DRAIN_BUDGET; i++) {
+    for (i = 0; i < UPF_SK_DRAIN_BUDGET; i++) {
         ssize_t size;
         ogs_sockaddr_t from;
         ogs_pkbuf_t *pkbuf = ogs_pkbuf_alloc(packet_pool, OGS_MAX_PKT_LEN);

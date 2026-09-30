@@ -1301,15 +1301,75 @@ def _find_items_ref_in_lines(item_lines):
     return None
 
 
+def _ref_json_type(ref_str, current_file, all_schemas, allow_nullable=False):
+    """
+    JSON type of the directly referenced schema, limited to what the
+    union code in model-body.mustache can represent:
+      "object" - has properties (a model struct)
+      "string" - plain string or format: byte (char *)
+    Enums, maps, free-form objects, dates and aliases return None.
+    Nullable schemas are only supported as top-level union alternatives.
+    """
+    result = _resolve_ref_to_schema(ref_str, current_file, all_schemas)
+    if result is None:
+        return None
+    _, schema = result
+    if schema.get("nullable") and not allow_nullable:
+        return None
+    if schema.get("properties"):
+        return "object"
+    if (schema.get("type") == "string" and "enum" not in schema
+            and schema.get("format") in (None, "byte")):
+        return "string"
+    return None
+
+
+def _inline_array_json_type(item_lines, current_file, all_schemas):
+    """
+    "array" if an inline array item is an array of models the union
+    code can represent: neither the array nor its items nullable, and
+    items.$ref to a schema with properties. None otherwise. The item
+    is parsed as YAML so comments and value spelling do not matter.
+    """
+    try:
+        parsed = yaml.safe_load("".join(item_lines))
+    except yaml.YAMLError:
+        return None
+    if not (isinstance(parsed, list) and len(parsed) == 1
+            and isinstance(parsed[0], dict)):
+        return None
+    array = parsed[0]
+    items = array.get("items")
+    if array.get("nullable") or not isinstance(items, dict):
+        return None
+    if items.get("nullable") or not isinstance(items.get("$ref"), str):
+        return None
+    if _ref_json_type(items["$ref"], current_file, all_schemas) != "object":
+        return None
+    return "array"
+
+
 def try_transform_category_i_mixed(lines, start_idx, all_schemas, current_file,
                                     eol="\n"):
     """
-    oneOf with mixed inline and $ref items -> named properties.
+    oneOf with distinct JSON types or mixed inline/$ref items -> named properties.
 
     Each item becomes a property in a type: object. Property names
     are derived from schema names:
       - $ref item: schema name (e.g. ExtendedSmSubsData)
       - inline array with items.$ref: schema name + "List"
+
+    The object is only a container for the C struct. When every item
+    has a distinct JSON type and a C representation the union code in
+    model-body.mustache supports (array of models, model, char *),
+    x-open5gs-union: true is added and the generated model serializes
+    the member that is set as the JSON value itself and picks the
+    member by JSON type when parsing, so the wire format follows the
+    oneOf (#4771). At most one alternative may also accept JSON null.
+    All-$ref unions such as Av5gAka | EapPayload are supported too.
+    Otherwise the plain wrapper object is generated for mixed items and
+    reported as a warning; items sharing a JSON type (e.g. several
+    arrays) would need item-level matching to be told apart.
 
     Skips "array or single object" patterns where an inline array's
     items.$ref and a sibling $ref point to the same schema
@@ -1328,6 +1388,7 @@ def try_transform_category_i_mixed(lines, start_idx, all_schemas, current_file,
     #      - type: array ...
     #      - $ref: '#/.../ExtendedSmSubsData'
         type: object
+        x-open5gs-union: true
         properties:
           SessionManagementSubscriptionDataList:
             type: array
@@ -1415,6 +1476,8 @@ def try_transform_category_i_mixed(lines, start_idx, all_schemas, current_file,
     has_inline_item = False
     prop_entries = []
     prop_names_seen = set()
+    json_types = []
+    nullable_count = 0
 
     for item in items:
         first = item[0].strip()
@@ -1435,6 +1498,13 @@ def try_transform_category_i_mixed(lines, start_idx, all_schemas, current_file,
             ]
             prop_entries.append((schema_name, value_lines))
             has_ref_item = True
+            json_types.append(
+                _ref_json_type(ref_val, current_file, all_schemas,
+                               allow_nullable=True))
+            resolved = _resolve_ref_to_schema(
+                ref_val, current_file, all_schemas)
+            if resolved is not None and resolved[1].get("nullable"):
+                nullable_count += 1
 
         elif first == "- type: array":
             # Inline array -> derive name from items.$ref
@@ -1471,6 +1541,8 @@ def try_transform_category_i_mixed(lines, start_idx, all_schemas, current_file,
                 value_lines.pop()
             prop_entries.append((prop_name, value_lines))
             has_inline_item = True
+            json_types.append(
+                _inline_array_json_type(item, current_file, all_schemas))
 
         elif first == "- type: object":
             # Inline object -> not supported, skip
@@ -1479,10 +1551,6 @@ def try_transform_category_i_mixed(lines, start_idx, all_schemas, current_file,
 
         else:
             return None
-
-    # Must have at least one inline item (otherwise category I handles it)
-    if not has_inline_item:
-        return None
 
     # --- Detect "array of X or single X" pattern ---
     # If an inline array's items.$ref target matches a sibling $ref target,
@@ -1503,6 +1571,13 @@ def try_transform_category_i_mixed(lines, start_idx, all_schemas, current_file,
                 if name:
                     array_items_targets.add(name)
     if ref_targets & array_items_targets:
+        return None
+
+    # --- Union at JSON level only if the items differ by JSON type ---
+    is_union = (None not in json_types
+                and len(set(json_types)) == len(json_types)
+                and nullable_count <= 1)
+    if not has_inline_item and not is_union:
         return None
 
     # --- Check sibling key conflict ---
@@ -1577,6 +1652,8 @@ def try_transform_category_i_mixed(lines, start_idx, all_schemas, current_file,
 
     # Generate object with properties
     out.append(" " * oneof_indent + "type: object" + eol)
+    if is_union:
+        out.append(" " * oneof_indent + "x-open5gs-union: true" + eol)
     out.append(" " * oneof_indent + "properties:" + eol)
     prop_indent = oneof_indent + 2
     for prop_name, value_lines in prop_entries:
@@ -1600,6 +1677,7 @@ def transform_lines(lines, string_schemas=None, all_schemas=None,
     changed_enum = changed_d = changed_allof = changed_e = changed_f = 0
     changed_i = changed_im = 0
     unhandled_oneof = []
+    wrapper_oneof = []
 
     while i < len(lines):
 
@@ -1655,13 +1733,15 @@ def transform_lines(lines, string_schemas=None, all_schemas=None,
                     changed_i += 1
                     continue
 
-            # I-mixed: inline+$ref mix -> each item becomes a named property
+            # I-mixed: distinct JSON types or inline+$ref -> named properties
             if all_schemas is not None:
                 transformed = try_transform_category_i_mixed(
                     lines, i, all_schemas, current_file, eol=eol)
                 if transformed is not None:
                     new_lines, next_i = transformed
                     out.extend(new_lines)
+                    if not any("x-open5gs-union" in l for l in new_lines):
+                        wrapper_oneof.append(i + 1)
                     i = next_i
                     changed_im += 1
                     continue
@@ -1697,7 +1777,7 @@ def transform_lines(lines, string_schemas=None, all_schemas=None,
         i += 1
 
     return (out, changed_enum, changed_d, changed_allof, changed_e,
-            changed_f, changed_i, changed_im, unhandled_oneof)
+            changed_f, changed_i, changed_im, unhandled_oneof, wrapper_oneof)
 
 
 # ---------------------------------------------------------------------------
@@ -1713,7 +1793,7 @@ def process_yaml_file(in_file: Path, out_file: Path,
 
     lines = split_lines_preserve_exact(original_text)
     (new_lines, c_enum, cd, ca, ce, cf,
-     ci, cim, unhandled) = transform_lines(
+     ci, cim, unhandled, wrapper) = transform_lines(
         lines, string_schemas=string_schemas, all_schemas=all_schemas,
         current_file=in_file.name)
     new_text = "".join(new_lines)
@@ -1722,7 +1802,7 @@ def process_yaml_file(in_file: Path, out_file: Path,
     with open(out_file, "w", encoding="utf-8", newline="") as f:
         f.write(new_text)
 
-    return c_enum, cd, ca, ce, cf, ci, cim, unhandled
+    return c_enum, cd, ca, ce, cf, ci, cim, unhandled, wrapper
 
 
 def copy_other_file(in_file: Path, out_file: Path):
@@ -1765,7 +1845,7 @@ def main():
     # ---- 2nd pass: transform ----
     total_yaml = 0
     total_enum = total_d = total_allof = total_e = total_f = 0
-    total_i = total_im = total_unhandled = 0
+    total_i = total_im = total_unhandled = total_wrapper = 0
 
     for in_file in sorted(input_dir.rglob("*")):
         if in_file.is_dir():
@@ -1775,7 +1855,8 @@ def main():
 
         if is_yaml_file(in_file):
             total_yaml += 1
-            c_enum, cd, ca, ce, cf, ci, cim, unhandled = process_yaml_file(
+            (c_enum, cd, ca, ce, cf, ci, cim,
+             unhandled, wrapper) = process_yaml_file(
                 in_file, out_file, string_schemas=string_schemas,
                 all_schemas=all_schemas)
             total_enum += c_enum
@@ -1786,11 +1867,15 @@ def main():
             total_i += ci
             total_im += cim
             total_unhandled += len(unhandled)
+            total_wrapper += len(wrapper)
             print(f"[YAML] {rel} "
                   f"(enum={c_enum}, d={cd}, allof={ca}, e={ce}, "
                   f"f={cf}, i={ci}, im={cim})")
             for ln in unhandled:
                 print(f"  [WARN] unhandled oneOf at line {ln}")
+            for ln in wrapper:
+                print(f"  [WARN] mixed oneOf kept as wrapper object "
+                      f"at line {ln}")
         else:
             copy_other_file(in_file, out_file)
             print(f"[COPY] {rel}")
@@ -1804,6 +1889,7 @@ def main():
     print(f"oneOf (validation-only)    : {total_f}")
     print(f"oneOf (all-$ref flatten)   : {total_i}")
     print(f"oneOf (mixed -> named prop) : {total_im}")
+    print(f"oneOf (mixed, wrapper only) : {total_wrapper}")
     print(f"oneOf (unhandled)          : {total_unhandled}")
 
 

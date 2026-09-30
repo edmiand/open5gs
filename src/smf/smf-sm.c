@@ -341,7 +341,12 @@ void smf_state_operational(ogs_fsm_t *s, smf_event_t *e)
         ogs_assert(gx_message);
 
         sess = smf_sess_find_by_id(e->sess_id);
-        ogs_assert(sess);
+        if (!sess) {
+            ogs_error("Gx message for removed session [%d]", e->sess_id);
+            OGS_SESSION_DATA_FREE(&gx_message->session_data);
+            ogs_free(gx_message);
+            break;
+        }
 
         switch(gx_message->cmd_code) {
         case OGS_DIAM_GX_CMD_CODE_CREDIT_CONTROL:
@@ -376,7 +381,11 @@ void smf_state_operational(ogs_fsm_t *s, smf_event_t *e)
         ogs_assert(gy_message);
 
         sess = smf_sess_find_by_id(e->sess_id);
-        ogs_assert(sess);
+        if (!sess) {
+            ogs_error("Gy message for removed session [%d]", e->sess_id);
+            ogs_free(gy_message);
+            break;
+        }
 
         switch(gy_message->cmd_code) {
         case OGS_DIAM_GY_CMD_CODE_CREDIT_CONTROL:
@@ -398,7 +407,11 @@ void smf_state_operational(ogs_fsm_t *s, smf_event_t *e)
         s6b_message = e->s6b_message;
         ogs_assert(s6b_message);
         sess = smf_sess_find_by_id(e->sess_id);
-        ogs_assert(sess);
+        if (!sess) {
+            ogs_error("S6b message for removed session [%d]", e->sess_id);
+            ogs_free(s6b_message);
+            break;
+        }
 
         switch(s6b_message->cmd_code) {
         case OGS_DIAM_S6B_CMD_AUTHENTICATION_AUTHORIZATION:
@@ -872,7 +885,7 @@ void smf_state_operational(ogs_fsm_t *s, smf_event_t *e)
                     e->h.sbi.message = &sbi_message;
                     ogs_fsm_dispatch(&nf_instance->sm, e);
                 } else
-                    ogs_error("NF instance FSM has been finalized");
+                    ogs_warn("NF instance FSM has been finalized");
 
                 break;
 
@@ -1096,9 +1109,11 @@ void smf_state_operational(ogs_fsm_t *s, smf_event_t *e)
                         &sess->serving_plmn_id, &sess->s_nssai,
                         SMF_METR_CTR_SM_PDUSESSIONCREATIONSUCC, 1);
             } else if (state == SMF_UECM_STATE_REGISTERED_HR) {
-                if (stream)
-                    smf_sbi_send_pdu_session_created_data(sess, stream);
-                else
+                if (stream) {
+                    if (smf_sbi_send_pdu_session_created_data(
+                                sess, stream) == false)
+                        break;
+                } else
                     ogs_error("Stream has already been removed");
 
                 smf_metrics_inst_by_slice_add(

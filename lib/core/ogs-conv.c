@@ -52,6 +52,29 @@ int ogs_ascii_to_hex(char *in, int in_len, void *out, int out_len)
     return j;
 }
 
+int ogs_ascii_to_hex_checked(
+        const char *in, int in_len, void *out, int out_len)
+{
+    int i;
+
+    if (!in || !out)
+        return OGS_ERROR;
+
+    if (in_len < 0 || out_len < 0 || out_len > INT_MAX / 2 ||
+        in_len != out_len * 2)
+        return OGS_ERROR;
+
+    for (i = 0; i < in_len; i++) {
+        if (!((in[i] >= '0' && in[i] <= '9') ||
+              (in[i] >= 'a' && in[i] <= 'f') ||
+              (in[i] >= 'A' && in[i] <= 'F')))
+            return OGS_ERROR;
+    }
+
+    ogs_ascii_to_hex((char *)in, in_len, out, out_len);
+    return OGS_OK;
+}
+
 void *ogs_hex_to_ascii(const void *in, int in_len, void *out, int out_len)
 {
     char *p, *last;
@@ -134,24 +157,36 @@ void *ogs_bcd_to_buffer_reverse_order(const char *in, void *out, int *out_len)
     return out;
 }
 
-void *ogs_buffer_to_bcd(uint8_t *in, int in_len, void *out)
+/*
+ * Decode TBCD (two digits per octet, low nibble first; 0xF in the high
+ * nibble of the last octet marks an odd number of digits) into
+ * a NUL-terminated ASCII string.
+ *
+ * Return out, or NULL if all digits and the NUL do not fit in out_len.
+ * Nothing is written on failure : a truncated identity would still look
+ * like a valid one.
+ */
+void *ogs_buffer_to_bcd(const uint8_t *in, int in_len, void *out, int out_len)
 {
-    int i = 0;
+    int i, num_of_digit;
     uint8_t *out_p = out;
 
-    for (i = 0; i < in_len-1; i++) {
-        out_p[i*2] = 0x30 + (in[i] & 0x0F);
-        out_p[i*2+1] = 0x30 + ((in[i] & 0xF0) >> 4);
-    }
+    if (in_len < 0 || in_len > INT_MAX / 2)
+        return NULL;
 
-    if ((in[i] & 0xF0) == 0xF0) {
-        out_p[i*2] = 0x30 + (in[i] & 0x0F);
-        out_p[i*2+1] = 0;
-    } else {
+    num_of_digit = in_len * 2;
+    if (in_len > 0 && (in[in_len-1] & 0xF0) == 0xF0)
+        num_of_digit--;
+
+    if (out_len < num_of_digit + 1)
+        return NULL;
+
+    for (i = 0; i < in_len; i++) {
         out_p[i*2] = 0x30 + (in[i] & 0x0F);
         out_p[i*2+1] = 0x30 + ((in[i] & 0xF0) >> 4);
-        out_p[i*2+2] = 0;
     }
+    /* The filler, if any, is overwritten by the NUL */
+    out_p[num_of_digit] = 0;
 
     return out;
 }

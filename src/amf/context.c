@@ -182,9 +182,12 @@ static int amf_context_validation(void)
                 ogs_app()->file);
         return OGS_ERROR;
     }
+    /* Zero omits T3502; T3512 must be non-zero. */
     if (ogs_nas_gprs_timer_from_sec(&gprs_timer, self.time.t3502.value) !=
         OGS_OK) {
-        ogs_error("Not support GPRS Timer 2 [%d]", (int)self.time.t3502.value);
+        ogs_error("Invalid amf.time.t3502.value `%lld` in '%s': "
+                "cannot encode as a NAS timer",
+                (long long)self.time.t3502.value, ogs_app()->file);
         return OGS_ERROR;
     }
     if (!self.time.t3512.value) {
@@ -194,7 +197,9 @@ static int amf_context_validation(void)
     }
     if (ogs_nas_gprs_timer_3_from_sec(&gprs_timer, self.time.t3512.value) !=
         OGS_OK) {
-        ogs_error("Not support GPRS Timer 3 [%d]", (int)self.time.t3512.value);
+        ogs_error("Invalid amf.time.t3512.value `%lld` in '%s': "
+                "cannot encode as a NAS timer",
+                (long long)self.time.t3512.value, ogs_app()->file);
         return OGS_ERROR;
     }
 
@@ -1021,37 +1026,51 @@ int amf_context_parse_config(void)
                         const char *time_key = ogs_yaml_iter_key(&time_iter);
                         ogs_assert(time_key);
                         if (!strcmp(time_key, "t3502")) {
-                            ogs_yaml_iter_t t3502_iter;
-                            ogs_yaml_iter_recurse(&time_iter, &t3502_iter);
-
-                            while (ogs_yaml_iter_next(&t3502_iter)) {
-                                const char *t3502_key =
-                                    ogs_yaml_iter_key(&t3502_iter);
-                                ogs_assert(t3502_key);
-
-                                if (!strcmp(t3502_key, "value")) {
-                                    const char *v = ogs_yaml_iter_value(&t3502_iter);
-                                    if (v)
-                                        self.time.t3502.value = atoll(v);
-                                } else
-                                    ogs_warn("unknown key `%s`", t3502_key);
-                            }
+                            rv = ogs_app_parse_timer_seconds("amf",
+                                    &time_iter, &self.time.t3502.value);
+                            if (rv != OGS_OK)
+                                return rv;
                         } else if (!strcmp(time_key, "t3512")) {
-                            ogs_yaml_iter_t t3512_iter;
-                            ogs_yaml_iter_recurse(&time_iter, &t3512_iter);
-
-                            while (ogs_yaml_iter_next(&t3512_iter)) {
-                                const char *t3512_key =
-                                    ogs_yaml_iter_key(&t3512_iter);
-                                ogs_assert(t3512_key);
-
-                                if (!strcmp(t3512_key, "value")) {
-                                    const char *v = ogs_yaml_iter_value(&t3512_iter);
-                                    if (v)
-                                        self.time.t3512.value = atoll(v);
-                                } else
-                                    ogs_warn("unknown key `%s`", t3512_key);
-                            }
+                            rv = ogs_app_parse_timer_seconds("amf",
+                                    &time_iter, &self.time.t3512.value);
+                            if (rv != OGS_OK)
+                                return rv;
+                        } else if (!strcmp(time_key, "t3513")) {
+                            rv = ogs_app_parse_timer_duration("amf",
+                                    &time_iter,
+                                    &amf_timer_cfg(AMF_TIMER_T3513)->duration);
+                            if (rv != OGS_OK)
+                                return rv;
+                        } else if (!strcmp(time_key, "t3522")) {
+                            rv = ogs_app_parse_timer_duration("amf",
+                                    &time_iter,
+                                    &amf_timer_cfg(AMF_TIMER_T3522)->duration);
+                            if (rv != OGS_OK)
+                                return rv;
+                        } else if (!strcmp(time_key, "t3550")) {
+                            rv = ogs_app_parse_timer_duration("amf",
+                                    &time_iter,
+                                    &amf_timer_cfg(AMF_TIMER_T3550)->duration);
+                            if (rv != OGS_OK)
+                                return rv;
+                        } else if (!strcmp(time_key, "t3555")) {
+                            rv = ogs_app_parse_timer_duration("amf",
+                                    &time_iter,
+                                    &amf_timer_cfg(AMF_TIMER_T3555)->duration);
+                            if (rv != OGS_OK)
+                                return rv;
+                        } else if (!strcmp(time_key, "t3560")) {
+                            rv = ogs_app_parse_timer_duration("amf",
+                                    &time_iter,
+                                    &amf_timer_cfg(AMF_TIMER_T3560)->duration);
+                            if (rv != OGS_OK)
+                                return rv;
+                        } else if (!strcmp(time_key, "t3570")) {
+                            rv = ogs_app_parse_timer_duration("amf",
+                                    &time_iter,
+                                    &amf_timer_cfg(AMF_TIMER_T3570)->duration);
+                            if (rv != OGS_OK)
+                                return rv;
                         } else if (!strcmp(time_key, "t3412")) {
                             /* handle config in mme */
                         } else if (!strcmp(time_key, "nf_instance")) {
@@ -1064,6 +1083,42 @@ int amf_context_parse_config(void)
                             /* handle config in app library */
                         } else
                             ogs_warn("unknown key `%s`", time_key);
+                    }
+                } else if (!strcmp(amf_key, "eir")) {
+                    ogs_yaml_iter_t eir_iter;
+                    ogs_yaml_iter_recurse(&amf_iter, &eir_iter);
+                    while (ogs_yaml_iter_next(&eir_iter)) {
+                        const char *eir_key = ogs_yaml_iter_key(&eir_iter);
+                        ogs_assert(eir_key);
+                        if (!strcmp(eir_key, "enabled")) {
+                            self.eir.enabled =
+                                ogs_yaml_iter_bool(&eir_iter);
+                        } else if (!strcmp(eir_key, "unknown_action")) {
+                            rv = ogs_app_parse_eir_action(&eir_iter,
+                                    eir_key, &self.eir.unknown_action);
+                            if (rv != OGS_OK) {
+                                ogs_error("ogs_app_parse_eir_action"
+                                        "(unknown_action) failed");
+                                return rv;
+                            }
+                        } else if (!strcmp(eir_key, "failure_action")) {
+                            rv = ogs_app_parse_eir_action(&eir_iter,
+                                    eir_key, &self.eir.failure_action);
+                            if (rv != OGS_OK) {
+                                ogs_error("ogs_app_parse_eir_action"
+                                        "(failure_action) failed");
+                                return rv;
+                            }
+                        } else if (!strcmp(eir_key, "missing_pei_action")) {
+                            rv = ogs_app_parse_eir_action(&eir_iter,
+                                    eir_key, &self.eir.missing_pei_action);
+                            if (rv != OGS_OK) {
+                                ogs_error("ogs_app_parse_eir_action"
+                                        "(missing_pei_action) failed");
+                                return rv;
+                            }
+                        } else
+                            ogs_warn("unknown key `%s`", eir_key);
                     }
                 } else if (!strcmp(amf_key, "default")) {
                     /* handle config in sbi library */
@@ -1752,8 +1807,19 @@ amf_ue_t *amf_ue_add(ran_ue_t *ran_ue)
 void amf_ue_remove(amf_ue_t *amf_ue)
 {
     int i;
+    ran_ue_t *ran_ue_holding = NULL;
 
     ogs_assert(amf_ue);
+
+    /*
+     * A held NG context keeps a reference back to this context. Sever it
+     * before the pool id can be reused, or the holding timer would
+     * resolve it to an unrelated UE.
+     */
+    ran_ue_holding = ran_ue_find_by_id(amf_ue->ran_ue_holding_id);
+    if (ran_ue_holding &&
+        ran_ue_holding->holding_amf_ue_id == amf_ue->id)
+        ran_ue_holding->holding_amf_ue_id = OGS_INVALID_POOL_ID;
 
     ogs_list_remove(&self.amf_ue_list, amf_ue);
 
@@ -2247,65 +2313,23 @@ static void amf_ue_release_old_context(
 
     ogs_warn("[%s] OLD UE Context Release", display);
     if (CM_CONNECTED(old_amf_ue)) {
-        ran_ue_t *ran_ue = ran_ue_find_by_id(old_amf_ue->ran_ue_id);
-        ran_ue_t *ran_ue_holding = NULL;
-
         /*
          * Keep the old NG context until the new registration is
          * authenticated. CLEAR_NG_CONTEXT(amf_ue) will then send
          * UEContextReleaseCommand to the old NG-RAN context.
          *
-         * Do not use HOLDING_NG_CONTEXT(old_amf_ue) here: that macro
-         * stores the holding id in old_amf_ue, but this function
-         * removes old_amf_ue below after moving the session context
-         * to the new amf_ue.
+         * The hold is recorded in amf_ue rather than old_amf_ue, which is
+         * removed below once its sessions have been moved across.
          */
         ogs_warn("[%s] Holding old NG context", display);
-        if (ran_ue) {
-            int r;
+        HOLDING_NG_CONTEXT_FOR(amf_ue, old_amf_ue);
 
-            ran_ue_holding =
-                ran_ue_find_by_id(amf_ue->ran_ue_holding_id);
-            if (ran_ue_holding) {
-                ogs_error("[%s] Holding NG context already exists",
-                        display);
-                ogs_error("[%s]    RAN_UE_NGAP_ID[%lld] "
-                        "AMF_UE_NGAP_ID[%lld]",
-                        display,
-                        (long long)ran_ue_holding->ran_ue_ngap_id,
-                        (long long)ran_ue_holding->amf_ue_ngap_id);
-                r = ngap_send_ran_ue_context_release_command(
-                        ran_ue_holding,
-                        NGAP_Cause_PR_nas,
-                        NGAP_CauseNas_normal_release,
-                        NGAP_UE_CTX_REL_NG_CONTEXT_REMOVE, 0);
-                ogs_expect(r == OGS_OK);
-            } else if (amf_ue->ran_ue_holding_id !=
-                    OGS_INVALID_POOL_ID) {
-                ogs_error("[%s] Holding NG context has already "
-                        "been removed", display);
-            }
-            amf_ue->ran_ue_holding_id = OGS_INVALID_POOL_ID;
-
-            ran_ue->amf_ue_id = OGS_INVALID_POOL_ID;
-
-            ogs_warn("[%s]    RAN_UE_NGAP_ID[%lld] "
-                    "AMF_UE_NGAP_ID[%lld]",
-                    old_amf_ue->suci,
-                    (long long)ran_ue->ran_ue_ngap_id,
-                    (long long)ran_ue->amf_ue_ngap_id);
-
-            ran_ue->ue_ctx_rel_action =
-                NGAP_UE_CTX_REL_NG_CONTEXT_REMOVE;
-            ogs_timer_start(ran_ue->t_ng_holding,
-                    amf_timer_cfg(AMF_TIMER_NG_HOLDING)->duration);
-
-            amf_ue->ran_ue_holding_id = old_amf_ue->ran_ue_id;
-            old_amf_ue->ran_ue_id = OGS_INVALID_POOL_ID;
-        } else {
-            ogs_error("[%s] RAN-NG Context has already been removed",
-                        old_amf_ue->suci);
-        }
+        /*
+         * Unlike the ordinary callers, nothing associates a new NG context
+         * with old_amf_ue after this, so clear it here rather than in the
+         * macro. CM_IDLE(old_amf_ue) has to see the context as released.
+         */
+        old_amf_ue->ran_ue_id = OGS_INVALID_POOL_ID;
     }
 
     /*
@@ -2437,6 +2461,33 @@ void amf_ue_associate_ran_ue(amf_ue_t *amf_ue, ran_ue_t *ran_ue)
 
     amf_ue->ran_ue_id = ran_ue->id;
     ran_ue->amf_ue_id = amf_ue->id;
+}
+
+void amf_ue_note_stale_user_plane(amf_ue_t *amf_ue, ran_ue_t *ran_ue)
+{
+    amf_sess_t *sess = NULL;
+
+    ogs_assert(amf_ue);
+    ogs_assert(ran_ue);
+
+    /*
+     * Only the sessions whose AN resources were established on this NG
+     * context can be left pointing at a GTP-U endpoint that is about to
+     * disappear. psimask.activated is exactly that set.
+     */
+    ogs_list_for_each(&amf_ue->sess_list, sess) {
+        if ((ran_ue->psimask.activated & (1 << sess->psi)) == 0)
+            continue;
+        if (!SESSION_CONTEXT_IN_SMF(sess))
+            continue;
+
+        sess->stale_ran_ue_id = ran_ue->id;
+
+        ogs_debug("[%s:%d] Stale user plane noted "
+                "[RAN_UE_NGAP_ID:%lld]",
+                amf_ue->supi ? amf_ue->supi : "Unknown", sess->psi,
+                (long long)ran_ue->ran_ue_ngap_id);
+    }
 }
 
 void amf_ue_deassociate_ran_ue(amf_ue_t *amf_ue, ran_ue_t *ran_ue)

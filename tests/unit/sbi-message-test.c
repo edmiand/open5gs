@@ -919,8 +919,419 @@ static void sbi_message_test10(abts_case *tc, void *param)
     }
 }
 
+typedef struct eir_status_case_s {
+    OpenAPI_equipment_status_e value;
+    const char *name;
+} eir_status_case_t;
+
+static const eir_status_case_t eir_status_cases[] = {
+    {OpenAPI_equipment_status_WHITELISTED, "WHITELISTED"},
+    {OpenAPI_equipment_status_BLACKLISTED, "BLACKLISTED"},
+    {OpenAPI_equipment_status_GREYLISTED, "GREYLISTED"},
+};
+
+static void eir_query_roundtrip(abts_case *tc, void *data)
+{
+    const char *supi = data;
+    ogs_sbi_request_t *request;
+    ogs_sbi_message_t message;
+    ogs_time_t duration;
+    int rv;
+
+    memset(&message, 0, sizeof(message));
+    message.h.method = (char *)OGS_SBI_HTTP_METHOD_GET;
+    message.h.uri = (char *)"/n5g-eir-eic/v1/equipment-status";
+    message.param.pei = (char *)"imeisv-4901542032375186";
+    message.param.supi = (char *)supi;
+
+    /* The request builder requires a timeout, without starting an NF. */
+    duration = ogs_local_conf()->time.message.duration;
+    ogs_local_conf()->time.message.duration = ogs_time_from_sec(10);
+    request = ogs_sbi_build_request(&message);
+    ogs_local_conf()->time.message.duration = duration;
+    ABTS_PTR_NOTNULL(tc, request);
+    if (!request) return;
+
+    rv = ogs_sbi_parse_request(&message, request);
+    ABTS_INT_EQUAL(tc, OGS_OK, rv);
+    ABTS_STR_EQUAL(tc, OGS_SBI_HTTP_METHOD_GET, message.h.method);
+    ABTS_STR_EQUAL(tc, "n5g-eir-eic", message.h.service.name);
+    ABTS_STR_EQUAL(tc, OGS_SBI_API_V1, message.h.api.version);
+    ABTS_STR_EQUAL(tc, OGS_SBI_RESOURCE_NAME_EQUIPMENT_STATUS,
+            message.h.resource.component[0]);
+    ABTS_STR_EQUAL(tc, "imeisv-4901542032375186", message.param.pei);
+    ABTS_STR_EQUAL(tc, supi, message.param.supi);
+
+    ogs_sbi_message_free(&message);
+    ogs_sbi_request_free(request);
+}
+
+static void eir_response_roundtrip(abts_case *tc, void *data)
+{
+    const eir_status_case_t *test = data;
+    OpenAPI_eir_response_data_t body;
+    ogs_sbi_message_t message, parsed;
+    ogs_sbi_response_t *response;
+    int rv;
+
+    ABTS_STR_EQUAL(tc, test->name,
+            OpenAPI_equipment_status_ToString(test->value));
+    ABTS_INT_EQUAL(tc, test->value,
+            OpenAPI_equipment_status_FromString((char *)test->name));
+
+    memset(&body, 0, sizeof(body));
+    body.status = test->value;
+    memset(&message, 0, sizeof(message));
+    message.EirResponseData = &body;
+
+    response = ogs_sbi_build_response(&message, OGS_SBI_HTTP_STATUS_OK);
+    ABTS_PTR_NOTNULL(tc, response);
+    if (!response) return;
+
+    /* The client transport normally copies the originating request header. */
+    response->h.method = ogs_strdup(OGS_SBI_HTTP_METHOD_GET);
+    response->h.uri = ogs_strdup("/n5g-eir-eic/v1/equipment-status");
+    rv = ogs_sbi_parse_response(&parsed, response);
+    ABTS_INT_EQUAL(tc, OGS_OK, rv);
+    ABTS_INT_EQUAL(tc, OGS_SBI_HTTP_STATUS_OK, parsed.res_status);
+    ABTS_STR_EQUAL(tc, OGS_SBI_CONTENT_JSON_TYPE, parsed.http.content_type);
+    ABTS_PTR_NOTNULL(tc, parsed.EirResponseData);
+    if (parsed.EirResponseData)
+        ABTS_INT_EQUAL(tc, test->value, parsed.EirResponseData->status);
+
+    ogs_sbi_message_free(&parsed);
+    ogs_sbi_response_free(response);
+}
+
+static void eir_malformed_response(abts_case *tc, void *data)
+{
+    cJSON *item = cJSON_Parse(data);
+    OpenAPI_eir_response_data_t *body;
+    int id = ogs_log_get_domain_id("core");
+    ogs_log_level_e level = ogs_log_get_domain_level(id);
+
+    ABTS_PTR_NOTNULL(tc, item);
+    if (!item) return;
+
+    if (level >= OGS_LOG_ERROR && level < OGS_LOG_DEBUG)
+        ogs_log_set_domain_level(id, OGS_LOG_FATAL);
+    body = OpenAPI_eir_response_data_parseFromJSON(item);
+    ogs_log_set_domain_level(id, level);
+    ABTS_PTR_EQUAL(tc, NULL, body);
+
+    OpenAPI_eir_response_data_free(body);
+    cJSON_Delete(item);
+}
+
+static void eir_unknown_status(abts_case *tc, void *data)
+{
+    cJSON *item = cJSON_Parse("{\"status\":\"BOGUS\"}");
+    OpenAPI_eir_response_data_t *body;
+
+    ABTS_PTR_NOTNULL(tc, item);
+    if (!item) return;
+
+    ABTS_INT_EQUAL(tc, OpenAPI_equipment_status_NULL,
+            OpenAPI_equipment_status_FromString("BOGUS"));
+    /* The generated model accepts unknown enum strings as status_NULL. */
+    body = OpenAPI_eir_response_data_parseFromJSON(item);
+    ABTS_PTR_NOTNULL(tc, body);
+    if (body)
+        ABTS_INT_EQUAL(tc, OpenAPI_equipment_status_NULL, body->status);
+
+    OpenAPI_eir_response_data_free(body);
+    cJSON_Delete(item);
+}
+
+static void eir_problem_roundtrip(abts_case *tc, void *data)
+{
+    OpenAPI_problem_details_t problem;
+    ogs_sbi_message_t message, parsed;
+    ogs_sbi_response_t *response;
+    int rv;
+
+    memset(&problem, 0, sizeof(problem));
+    problem.is_status = true;
+    problem.status = OGS_SBI_HTTP_STATUS_NOT_FOUND;
+    problem.cause = (char *)"ERROR_EQUIPMENT_UNKNOWN";
+    memset(&message, 0, sizeof(message));
+    message.http.content_type = (char *)OGS_SBI_CONTENT_PROBLEM_TYPE;
+    message.ProblemDetails = &problem;
+
+    response = ogs_sbi_build_response(&message, problem.status);
+    ABTS_PTR_NOTNULL(tc, response);
+    if (!response) return;
+
+    /* The client transport normally copies the originating request header. */
+    response->h.method = ogs_strdup(OGS_SBI_HTTP_METHOD_GET);
+    response->h.uri = ogs_strdup("/n5g-eir-eic/v1/equipment-status");
+    rv = ogs_sbi_parse_response(&parsed, response);
+    ABTS_INT_EQUAL(tc, OGS_OK, rv);
+    ABTS_INT_EQUAL(tc, OGS_SBI_HTTP_STATUS_NOT_FOUND, parsed.res_status);
+    ABTS_STR_EQUAL(tc, OGS_SBI_CONTENT_PROBLEM_TYPE, parsed.http.content_type);
+    ABTS_PTR_NOTNULL(tc, parsed.ProblemDetails);
+    if (parsed.ProblemDetails) {
+        ABTS_TRUE(tc, parsed.ProblemDetails->is_status);
+        ABTS_INT_EQUAL(tc, OGS_SBI_HTTP_STATUS_NOT_FOUND,
+                parsed.ProblemDetails->status);
+        ABTS_STR_EQUAL(tc, "ERROR_EQUIPMENT_UNKNOWN",
+                parsed.ProblemDetails->cause);
+    }
+
+    ogs_sbi_message_free(&parsed);
+    ogs_sbi_response_free(response);
+}
+
+/* oneOf union (x-open5gs-union): SmSubsData is a bare array or an
+ * ExtendedSmSubsData object on the wire, never a wrapper object */
+static void sbi_message_test12(abts_case *tc, void *data)
+{
+    const char *sm_array =
+        "{\"smData\":[{\"singleNssai\":{\"sst\":1},"
+        "\"dnnConfigurations\":{\"internet\":{"
+        "\"pduSessionTypes\":{\"defaultSessionType\":\"IPV4\"},"
+        "\"sscModes\":{\"defaultSscMode\":\"SSC_MODE_1\"}}}}]}";
+    const char *sm_extended =
+        "{\"smData\":{\"sharedSmSubsDataIds\":[\"12345-shared-1\"]}}";
+    const char *sm_bad_item =
+        "{\"smData\":[{\"singleNssai\":{\"sst\":1}},1]}";
+
+    int id = ogs_log_get_domain_id("core");
+    ogs_log_level_e level = ogs_log_get_domain_level(id);
+
+    cJSON *item = NULL;
+    char *content = NULL;
+    OpenAPI_provisioned_data_sets_t *sets = NULL;
+    OpenAPI_provisioned_data_sets_t *copy = NULL;
+    OpenAPI_sm_subs_data_t *sm_data = NULL;
+
+    /* array alternative, relayed by the UDM with _copy() */
+    item = cJSON_Parse(sm_array);
+    ABTS_PTR_NOTNULL(tc, item);
+    sets = OpenAPI_provisioned_data_sets_parseFromJSON(item);
+    cJSON_Delete(item);
+    ABTS_PTR_NOTNULL(tc, sets);
+    ABTS_PTR_NOTNULL(tc, sets->sm_data);
+    ABTS_PTR_NOTNULL(tc,
+            sets->sm_data->session_management_subscription_data_list);
+    ABTS_INT_EQUAL(tc, 1,
+            sets->sm_data->session_management_subscription_data_list->count);
+    ABTS_TRUE(tc, sets->sm_data->extended_sm_subs_data == NULL);
+
+    copy = OpenAPI_provisioned_data_sets_copy(NULL, sets);
+    ABTS_PTR_NOTNULL(tc, copy);
+    ABTS_PTR_NOTNULL(tc, copy->sm_data);
+    ABTS_PTR_NOTNULL(tc,
+            copy->sm_data->session_management_subscription_data_list);
+    ABTS_INT_EQUAL(tc, 1,
+            copy->sm_data->session_management_subscription_data_list->count);
+
+    item = OpenAPI_provisioned_data_sets_convertToJSON(copy);
+    ABTS_PTR_NOTNULL(tc, item);
+    ABTS_TRUE(tc, cJSON_IsArray(
+                cJSON_GetObjectItemCaseSensitive(item, "smData")));
+    content = cJSON_PrintUnformatted(item);
+    ABTS_STR_EQUAL(tc, sm_array, content);
+    ogs_free(content);
+    cJSON_Delete(item);
+    OpenAPI_provisioned_data_sets_free(copy);
+    OpenAPI_provisioned_data_sets_free(sets);
+
+    /* object alternative */
+    item = cJSON_Parse(sm_extended);
+    ABTS_PTR_NOTNULL(tc, item);
+    sets = OpenAPI_provisioned_data_sets_parseFromJSON(item);
+    cJSON_Delete(item);
+    ABTS_PTR_NOTNULL(tc, sets);
+    ABTS_PTR_NOTNULL(tc, sets->sm_data);
+    ABTS_PTR_NOTNULL(tc, sets->sm_data->extended_sm_subs_data);
+    ABTS_TRUE(tc,
+            sets->sm_data->session_management_subscription_data_list == NULL);
+
+    item = OpenAPI_provisioned_data_sets_convertToJSON(sets);
+    ABTS_PTR_NOTNULL(tc, item);
+    content = cJSON_PrintUnformatted(item);
+    ABTS_STR_EQUAL(tc, sm_extended, content);
+    ogs_free(content);
+    cJSON_Delete(item);
+    OpenAPI_provisioned_data_sets_free(sets);
+
+    /*
+     * Malformed input and misuse are rejected with a diagnostic. Only
+     * the return value matters here, so silence the domain meanwhile.
+     */
+    ogs_log_set_domain_level(id, OGS_LOG_NONE);
+
+    /* a wrong item after a valid one */
+    item = cJSON_Parse(sm_bad_item);
+    ABTS_PTR_NOTNULL(tc, item);
+    sets = OpenAPI_provisioned_data_sets_parseFromJSON(item);
+    cJSON_Delete(item);
+    ABTS_TRUE(tc, sets == NULL);
+
+    /* exactly one alternative must be set: none ... */
+    sm_data = OpenAPI_sm_subs_data_create(NULL, NULL);
+    ABTS_PTR_NOTNULL(tc, sm_data);
+    ABTS_TRUE(tc, OpenAPI_sm_subs_data_convertToJSON(sm_data) == NULL);
+    OpenAPI_sm_subs_data_free(sm_data);
+
+    /* ... or both, each valid on its own so that only the check fails */
+    item = cJSON_Parse(sm_array);
+    ABTS_PTR_NOTNULL(tc, item);
+    sets = OpenAPI_provisioned_data_sets_parseFromJSON(item);
+    cJSON_Delete(item);
+    ABTS_PTR_NOTNULL(tc, sets);
+    item = cJSON_Parse(sm_extended);
+    ABTS_PTR_NOTNULL(tc, item);
+    copy = OpenAPI_provisioned_data_sets_parseFromJSON(item);
+    cJSON_Delete(item);
+    ABTS_PTR_NOTNULL(tc, copy);
+
+    sm_data = sets->sm_data;
+    sm_data->extended_sm_subs_data = copy->sm_data->extended_sm_subs_data;
+    copy->sm_data->extended_sm_subs_data = NULL;
+    ABTS_TRUE(tc, OpenAPI_sm_subs_data_convertToJSON(sm_data) == NULL);
+    OpenAPI_provisioned_data_sets_free(sets);
+    OpenAPI_provisioned_data_sets_free(copy);
+
+    ogs_log_set_domain_level(id, level);
+}
+
+/* 5gAuthData preserves the selected object, string or explicit null value. */
+static void sbi_message_test13(abts_case *tc, void *data)
+{
+    const char *cases[] = {
+        ("{\"authType\":\"5G_AKA\",\"5gAuthData\":{"
+        "\"rand\":\"00112233445566778899aabbccddeeff\","
+        "\"hxresStar\":\"00112233445566778899aabbccddeeff\","
+        "\"autn\":\"00112233445566778899aabbccddeeff\"},\"_links\":{}}"),
+        ("{\"authType\":\"EAP_AKA_PRIME\","
+        "\"5gAuthData\":\"cGF5bG9hZA==\",\"_links\":{}}"),
+        "{\"authType\":\"EAP_AKA_PRIME\",\"5gAuthData\":null,\"_links\":{}}"
+    };
+    OpenAPI_ue_authentication_ctx_t *ctx, *copy;
+    OpenAPI_ue_authentication_ctx_5g_auth_data_t auth_data;
+    OpenAPI_av5g_aka_t av = {0};
+    cJSON *item, *encoded;
+    size_t i;
+    int id = ogs_log_get_domain_id("core");
+    ogs_log_level_e level = ogs_log_get_domain_level(id);
+
+    for (i = 0; i < OGS_ARRAY_SIZE(cases); i++) {
+        item = cJSON_Parse(cases[i]);
+        ABTS_PTR_NOTNULL(tc, item);
+        ctx = OpenAPI_ue_authentication_ctx_parseFromJSON(item);
+        ABTS_PTR_NOTNULL(tc, ctx);
+        if (ctx) {
+            ABTS_PTR_NOTNULL(tc, ctx->_5g_auth_data);
+            if (ctx->_5g_auth_data) {
+                ABTS_INT_EQUAL(tc, i == 0,
+                        ctx->_5g_auth_data->av5g_aka != NULL);
+                ABTS_INT_EQUAL(tc, i == 1,
+                        ctx->_5g_auth_data->eap_payload != NULL);
+                ABTS_INT_EQUAL(tc, i == 2,
+                        ctx->_5g_auth_data->is_eap_payload_null);
+            }
+            copy = OpenAPI_ue_authentication_ctx_copy(NULL, ctx);
+            ABTS_PTR_NOTNULL(tc, copy);
+            if (copy) {
+                encoded = OpenAPI_ue_authentication_ctx_convertToJSON(copy);
+                ABTS_PTR_NOTNULL(tc, encoded);
+                ABTS_TRUE(tc, cJSON_Compare(item, encoded, true));
+                cJSON_Delete(encoded);
+                OpenAPI_ue_authentication_ctx_free(copy);
+            }
+            OpenAPI_ue_authentication_ctx_free(ctx);
+        }
+        cJSON_Delete(item);
+    }
+
+    ogs_log_set_domain_level(id, OGS_LOG_NONE);
+    memset(&auth_data, 0, sizeof(auth_data));
+
+    /* No alternative selected. */
+    item = OpenAPI_ue_authentication_ctx_5g_auth_data_convertToJSON(&auth_data);
+    ABTS_TRUE(tc, item == NULL);
+    cJSON_Delete(item);
+
+    /* Both object and string alternatives selected. */
+    av.rand = av.hxres_star = av.autn = (char *)"00112233445566778899aabbccddeeff";
+    auth_data.av5g_aka = &av;
+    auth_data.eap_payload = (char *)"cGF5bG9hZA==";
+    item = OpenAPI_ue_authentication_ctx_5g_auth_data_convertToJSON(&auth_data);
+    ABTS_TRUE(tc, item == NULL);
+    cJSON_Delete(item);
+
+    /* Explicit null and a string value cannot both be selected. */
+    auth_data.av5g_aka = NULL;
+    auth_data.is_eap_payload_null = true;
+    item = OpenAPI_ue_authentication_ctx_5g_auth_data_convertToJSON(&auth_data);
+    ABTS_TRUE(tc, item == NULL);
+    cJSON_Delete(item);
+    ogs_log_set_domain_level(id, level);
+}
+
+static void sbi_message_test14(abts_case *tc, void *data)
+{
+    const struct {
+        const char *uri;
+        int expected;
+    } cases[] = {
+        /* URI from the CIFuzz input: 20 f7 3a 2f 2f 26. */
+        { "\xf7://&", OGS_ERROR },
+        /* Absolute URIs without a path must not start tokenization. */
+        { "http://localhost", OGS_ERROR },
+        { "https://localhost:7777", OGS_ERROR },
+        { "http://[::1]:7777", OGS_ERROR },
+        { "http://localhost?key=value", OGS_ERROR },
+        { "http://localhost#fragment", OGS_ERROR },
+        /* Empty paths and missing API versions are also invalid. */
+        { "", OGS_ERROR },
+        { "/", OGS_ERROR },
+        { "http://localhost/", OGS_ERROR },
+        { "/nnrf-nfm", OGS_ERROR },
+        /* Preserve relative/absolute URI parsing and percent decoding. */
+        { "/nnrf-nfm/v1/nf-instances", OGS_OK },
+        { "http://localhost/nnrf-nfm/v1/nf-instances", OGS_OK },
+        { "https://localhost:7777/nnrf-nfm/v1/nf-instances", OGS_OK },
+        { "http://[::1]:7777/nnrf-nfm/v1/nf-instances", OGS_OK },
+        { "/nnrf%2dnfm/v1/nf%2dinstances", OGS_OK },
+    };
+    ogs_sbi_header_t header;
+    ogs_sbi_message_t message;
+    int id = ogs_log_get_domain_id("sbi");
+    ogs_log_level_e level = ogs_log_get_domain_level(id);
+    int rv;
+    size_t i;
+
+    ogs_log_set_domain_level(id, OGS_LOG_NONE);
+    for (i = 0; i < OGS_ARRAY_SIZE(cases); i++) {
+        memset(&header, 0, sizeof(header));
+        header.method = ogs_strdup(OGS_SBI_HTTP_METHOD_GET);
+        header.uri = ogs_strdup(cases[i].uri);
+        ABTS_PTR_NOTNULL(tc, header.method);
+        ABTS_PTR_NOTNULL(tc, header.uri);
+
+        rv = ogs_sbi_parse_header(&message, &header);
+        ABTS_INT_EQUAL(tc, cases[i].expected, rv);
+        if (rv == OGS_OK) {
+            ABTS_STR_EQUAL(tc, "nnrf-nfm", message.h.service.name);
+            ABTS_STR_EQUAL(tc, "v1", message.h.api.version);
+            ABTS_STR_EQUAL(tc, "nf-instances",
+                    message.h.resource.component[0]);
+            ABTS_PTR_EQUAL(tc, NULL, message.h.resource.component[1]);
+        }
+
+        ogs_sbi_header_free(&header);
+        ogs_free(header.uri);
+    }
+    ogs_log_set_domain_level(id, level);
+}
+
 abts_suite *test_sbi_message(abts_suite *suite)
 {
+    size_t i;
+
     suite = ADD_SUITE(suite)
 
     abts_run_test(suite, sbi_message_test1, NULL);
@@ -933,6 +1344,20 @@ abts_suite *test_sbi_message(abts_suite *suite)
     abts_run_test(suite, sbi_message_test8, NULL);
     abts_run_test(suite, sbi_message_test9, NULL);
     abts_run_test(suite, sbi_message_test10, NULL);
+    abts_run_test(suite, eir_query_roundtrip,
+            (void *)"imsi-001010123456789");
+    abts_run_test(suite, eir_query_roundtrip, NULL);
+    for (i = 0; i < OGS_ARRAY_SIZE(eir_status_cases); i++)
+        abts_run_test(suite, eir_response_roundtrip,
+                (void *)&eir_status_cases[i]);
+    abts_run_test(suite, eir_malformed_response, (void *)"{}");
+    abts_run_test(suite, eir_malformed_response, (void *)"{\"status\":1}");
+    abts_run_test(suite, eir_malformed_response, (void *)"{\"status\":null}");
+    abts_run_test(suite, eir_unknown_status, NULL);
+    abts_run_test(suite, eir_problem_roundtrip, NULL);
+    abts_run_test(suite, sbi_message_test12, NULL);
+    abts_run_test(suite, sbi_message_test13, NULL);
+    abts_run_test(suite, sbi_message_test14, NULL);
 
     return suite;
 }
