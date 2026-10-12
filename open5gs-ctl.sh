@@ -98,7 +98,9 @@ webui_start() {
         echo "  webui: ERROR — node_modules missing, run: cd webui && npm ci"; return 1
     fi
     mkdir -p "$RUNDIR"
-    HOSTNAME="$WEBUI_HOSTNAME" npm run dev --prefix "$WEBUI_DIR" \
+    # setsid: give webui its own process group. webui_stop kills the whole
+    # group, which would otherwise include whatever script launched us.
+    HOSTNAME="$WEBUI_HOSTNAME" setsid npm run dev --prefix "$WEBUI_DIR" \
         >> "$LOGDIR/webui.log" 2>&1 &
     local bgpid=$!
     sleep 3

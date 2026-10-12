@@ -440,10 +440,14 @@ health_check_all() {
         local err_count=0
         if (( new_lines > 0 )); then
             local raw_errlines
+            # Match the ogs_log level tag, not the bare word: a case-insensitive
+            # "error" also hits INFO lines like "[pfcp] INFO: Remove Error
+            # Indication F-TEID", which the UPF logs on every shutdown and which
+            # caused a false-positive rollback on 2026-10-12.
             if [[ " $root_nfs " == *" $nf "* ]]; then
-                raw_errlines=$(sudo tail -n "$new_lines" "$log" 2>/dev/null | grep -Eai "FATAL|ERROR" || true)
+                raw_errlines=$(sudo tail -n "$new_lines" "$log" 2>/dev/null | grep -Ea "\] (FATAL|ERROR): " || true)
             else
-                raw_errlines=$(tail -n "$new_lines" "$log" 2>/dev/null | grep -Eai "FATAL|ERROR" || true)
+                raw_errlines=$(tail -n "$new_lines" "$log" 2>/dev/null | grep -Ea "\] (FATAL|ERROR): " || true)
             fi
             if [[ -n $raw_errlines ]]; then
                 local raw_count kept_errlines kept_count
