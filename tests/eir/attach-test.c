@@ -20,7 +20,7 @@
 /*
  * ME Identity Check over S13 against the Open5GS EIR (open5gs-eird).
  *
- * The MME runs with eir.enabled (configs/eir.yaml) and the EIR serves S13
+ * The MME runs with eir.enabled (configs/sample.yaml) and the EIR serves S13
  * next to N5g-eir out of the same eir collection. Each case provisions
  * records for the test UE IMEISV, runs an EPS attach, and checks what
  * follows Security Mode Complete: ESM Information Request when the
@@ -39,26 +39,25 @@ typedef struct attach_case_s {
     const char *generic_status;     /* eir record for the PEI only */
     const char *specific_status;    /* eir record for the PEI and a SUPI */
     bool specific_other_supi;       /* ...of another subscriber */
-    ogs_nas_emm_cause_t reject_policy_cause; /* 0: attach accepted */
-    ogs_nas_emm_cause_t allow_policy_cause;
+    ogs_nas_emm_cause_t expected_cause; /* 0: attach accepted */
 } attach_case_t;
 
 static const attach_case_t cases[] = {
-    { "whitelisted equipment attaches", "WHITELISTED", NULL, false, 0, 0 },
-    { "greylisted equipment attaches", "GREYLISTED", NULL, false, 0, 0 },
+    { "whitelisted equipment attaches", "WHITELISTED", NULL, false, 0 },
+    { "greylisted equipment attaches", "GREYLISTED", NULL, false, 0 },
     { "blacklisted equipment is rejected", "BLACKLISTED", NULL, false,
-        OGS_NAS_EMM_CAUSE_ILLEGAL_ME, OGS_NAS_EMM_CAUSE_ILLEGAL_ME },
-    { "unknown equipment follows policy", NULL, NULL, false,
-        OGS_NAS_EMM_CAUSE_EPS_SERVICES_NOT_ALLOWED, 0 },
+        OGS_NAS_EMM_CAUSE_ILLEGAL_ME },
+    { "unknown equipment is rejected", NULL, NULL, false,
+        OGS_NAS_EMM_CAUSE_EPS_SERVICES_NOT_ALLOWED },
     { "subscriber blacklist overrides generic whitelist",
         "WHITELISTED", "BLACKLISTED", false,
-        OGS_NAS_EMM_CAUSE_ILLEGAL_ME, OGS_NAS_EMM_CAUSE_ILLEGAL_ME },
+        OGS_NAS_EMM_CAUSE_ILLEGAL_ME },
     { "subscriber whitelist overrides generic blacklist",
-        "BLACKLISTED", "WHITELISTED", false, 0, 0 },
+        "BLACKLISTED", "WHITELISTED", false, 0 },
     { "record of another subscriber does not apply",
-        "WHITELISTED", "BLACKLISTED", true, 0, 0 },
-    { "EIR server failure follows policy", "INVALID", NULL, false,
-        OGS_NAS_EMM_CAUSE_NETWORK_FAILURE, 0 },
+        "WHITELISTED", "BLACKLISTED", true, 0 },
+    { "EIR server failure is rejected", "INVALID", NULL, false,
+        OGS_NAS_EMM_CAUSE_NETWORK_FAILURE },
 };
 
 typedef struct fixture_s {
@@ -134,8 +133,7 @@ static void fixture_remove(abts_case *tc, fixture_t *fixture)
 static void attach_case(abts_case *tc, void *data)
 {
     const attach_case_t *test = data;
-    ogs_nas_emm_cause_t expected_cause = test_eir_allow_policy() ?
-        test->allow_policy_cause : test->reject_policy_cause;
+    ogs_nas_emm_cause_t expected_cause = test->expected_cause;
     int rv;
     ogs_socknode_t *s1ap = NULL;
     ogs_socknode_t *gtpu = NULL;
@@ -197,7 +195,7 @@ static void attach_case(abts_case *tc, void *data)
     ABTS_PTR_NOTNULL(tc, doc);
     if (!doc)
         goto cleanup;
-    rv = test_db_insert_ue(test_ue, doc);
+    rv = test_db_insert_subscriber(test_ue, doc);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
     if (rv != OGS_OK)
         goto cleanup;

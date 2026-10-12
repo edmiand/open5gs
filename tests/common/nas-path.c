@@ -54,6 +54,7 @@ void testgmm_recv(test_ue_t *test_ue, ogs_pkbuf_t *pkbuf)
                 &message.gmm.authentication_request);
         break;
     case OGS_NAS_5GS_AUTHENTICATION_REJECT:
+    case OGS_NAS_5GS_DEREGISTRATION_ACCEPT_FROM_UE:
         break;
     case OGS_NAS_5GS_SECURITY_MODE_COMMAND:
         break;
@@ -153,6 +154,8 @@ void testemm_recv(test_ue_t *test_ue, ogs_pkbuf_t *pkbuf)
                 &message.emm.authentication_request);
         break;
     case OGS_NAS_EPS_AUTHENTICATION_REJECT:
+        break;
+    case OGS_NAS_EPS_DETACH_ACCEPT:
         break;
     case OGS_NAS_EPS_SECURITY_MODE_COMMAND:
         break;

@@ -8,18 +8,28 @@ testapp_eir_exe = executable('eir',
         service-test.c
         registration-test.c
         attach-test.c
+        epc-guti-test.c
+        amf-guti-test.c
     '''.split()),
     c_args : testunit_core_cc_flags,
     dependencies : [libtestapp_dep, libcurl_dep])
 
-test('eir', testapp_eir_exe,
-    env : ['OPEN5GS_EIR_TEST_POLICY=reject'],
+test('eir-4g', testapp_eir_exe,
+    args : ['attach-test'],
     is_parallel : false,
-    timeout : 180,
-    suite : ['eir', 'app'])
+    suite : ['eir', 'epc'])
 
-test('eir-allow', testapp_eir_exe,
-    env : ['OPEN5GS_EIR_TEST_POLICY=allow'],
+test('eir-5g', testapp_eir_exe,
+    args : ['dbi-test', 'service-test', 'registration-test'],
     is_parallel : false,
-    timeout : 180,
-    suite : ['eir', 'app'])
+    suite : ['eir', '5gc'])
+
+test('eir-s13', testapp_eir_exe,
+    args : ['epc-guti-test'],
+    is_parallel : false,
+    suite : ['eir', 'epc'])
+
+test('eir-n5g', testapp_eir_exe,
+    args : ['amf-guti-test'],
+    is_parallel : false,
+    suite : ['eir', '5gc'])

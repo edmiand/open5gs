@@ -446,12 +446,12 @@ int emm_handle_authentication_response(
         authentication_response_parameter->length != mme_ue->xres_len ||
         memcmp(authentication_response_parameter->res, mme_ue->xres,
         mme_ue->xres_len) != 0) {
-        ogs_error("Authentication failed [RES length:%d, XRES length:%d]",
+        ogs_warn("Authentication failed [RES length:%d, XRES length:%d]",
                 authentication_response_parameter->length, mme_ue->xres_len);
-        ogs_log_hexdump(OGS_LOG_ERROR,
+        ogs_log_hexdump(OGS_LOG_WARN,
                 authentication_response_parameter->res,
                 authentication_response_parameter->length);
-        ogs_log_hexdump(OGS_LOG_ERROR,
+        ogs_log_hexdump(OGS_LOG_WARN,
                 mme_ue->xres, OGS_MAX_RES_LEN);
         return OGS_ERROR;
     } else {
@@ -991,10 +991,15 @@ int emm_handle_security_mode_complete(
              * IMEISV(16 digits) ==> 8bytes
              */
             if (imeisv->length == sizeof(ogs_nas_mobile_identity_imeisv_t)) {
+                if (ogs_nas_imeisv_to_bcd(&imeisv->imeisv, imeisv->length,
+                            mme_ue->imeisv_bcd) != OGS_OK) {
+                    ogs_error("[%s] Invalid IMEISV encoding", mme_ue->imsi_bcd);
+                    ogs_log_hexdump(OGS_LOG_ERROR,
+                            (unsigned char *)&imeisv->imeisv, imeisv->length);
+                    break;
+                }
                 memcpy(&mme_ue->nas_mobile_identity_imeisv,
                     &imeisv->imeisv, imeisv->length);
-                ogs_nas_imeisv_to_bcd(&imeisv->imeisv, imeisv->length,
-                        mme_ue->imeisv_bcd);
                 ogs_bcd_to_buffer(mme_ue->imeisv_bcd,
                         mme_ue->imeisv, &mme_ue->imeisv_len);
                 ogs_nas_imeisv_bcd_to_buffer(mme_ue->imeisv_bcd,
@@ -1009,7 +1014,7 @@ int emm_handle_security_mode_complete(
             }
             break;
         default:
-            ogs_warn("Invalid IMEISV Type[%d]", imeisv->imeisv.type);
+            ogs_error("Invalid IMEISV Type[%d]", imeisv->imeisv.type);
             break;
 
         }

@@ -503,18 +503,20 @@ ogs_nas_5gmm_cause_t gmm_handle_registration_update(
         psimask |= pdu_session_status->psi << 8;
         psimask |= pdu_session_status->psi >> 8;
 
-        ogs_list_for_each(&amf_ue->sess_list, sess) {
-            if ((psimask & (1 << sess->psi)) == 0) {
-                if (SESSION_CONTEXT_IN_SMF(sess)) {
-                    amf_nsmf_pdusession_sm_context_param_t param;
+        if (!amf_ue->registration_session_release_after_authentication) {
+            ogs_list_for_each(&amf_ue->sess_list, sess) {
+                if ((psimask & (1 << sess->psi)) == 0) {
+                    if (SESSION_CONTEXT_IN_SMF(sess)) {
+                        amf_nsmf_pdusession_sm_context_param_t param;
 
-                    memset(&param, 0, sizeof(param));
-                    param.ue_location = true;
-                    param.ue_timezone = true;
+                        memset(&param, 0, sizeof(param));
+                        param.ue_location = true;
+                        param.ue_timezone = true;
 
-                    amf_sbi_send_release_session(
-                        ran_ue, sess,
-                        AMF_RELEASE_SM_CONTEXT_REGISTRATION_ACCEPT, &param);
+                        amf_sbi_send_release_session(
+                            ran_ue, sess,
+                            AMF_RELEASE_SM_CONTEXT_REGISTRATION_ACCEPT, &param);
+                    }
                 }
             }
         }
@@ -530,12 +532,14 @@ ogs_nas_5gmm_cause_t gmm_handle_registration_update(
         psimask |= uplink_data_status->psi << 8;
         psimask |= uplink_data_status->psi >> 8;
 
-        ogs_list_for_each(&amf_ue->sess_list, sess) {
-            if (psimask & (1 << sess->psi)) {
-                if (SESSION_CONTEXT_IN_SMF(sess))
-                    amf_sbi_send_activating_session(
-                            ran_ue, sess,
-                            AMF_UPDATE_SM_CONTEXT_REGISTRATION_REQUEST);
+        if (!amf_ue->registration_session_release_after_authentication) {
+            ogs_list_for_each(&amf_ue->sess_list, sess) {
+                if (psimask & (1 << sess->psi)) {
+                    if (SESSION_CONTEXT_IN_SMF(sess))
+                        amf_sbi_send_activating_session(
+                                ran_ue, sess,
+                                AMF_UPDATE_SM_CONTEXT_REGISTRATION_REQUEST);
+                }
             }
         }
     }
@@ -986,12 +990,12 @@ int gmm_handle_authentication_response(amf_ue_t *amf_ue,
             amf_ue->rand, authentication_response_parameter->res, hxres_star);
 
     if (memcmp(hxres_star, amf_ue->hxres_star, OGS_MAX_RES_LEN) != 0) {
-        ogs_error("[%s] MAC failure", amf_ue->suci);
-        ogs_log_hexdump(OGS_LOG_ERROR,
+        ogs_warn("[%s] MAC failure", amf_ue->suci);
+        ogs_log_hexdump(OGS_LOG_WARN,
                 authentication_response_parameter->res,
                 authentication_response_parameter->length);
-        ogs_log_hexdump(OGS_LOG_ERROR, hxres_star, OGS_MAX_RES_LEN);
-        ogs_log_hexdump(OGS_LOG_ERROR,
+        ogs_log_hexdump(OGS_LOG_WARN, hxres_star, OGS_MAX_RES_LEN);
+        ogs_log_hexdump(OGS_LOG_WARN,
                 amf_ue->hxres_star, OGS_MAX_RES_LEN);
         return OGS_ERROR;
     }
@@ -1125,22 +1129,31 @@ ogs_nas_5gmm_cause_t gmm_handle_security_mode_complete(amf_ue_t *amf_ue,
         mobile_identity_imeisv =
             (ogs_nas_mobile_identity_imeisv_t *)imeisv->buffer;
         ogs_assert(mobile_identity_imeisv);
-
-        switch (mobile_identity_imeisv->type) {
-        case OGS_NAS_5GS_MOBILE_IDENTITY_IMEISV:
-            /* TS23.003 6.2.2 Composition of IMEISV
-             *
-             * The International Mobile station Equipment Identity and
-             * Software Version Number (IMEISV) is composed.
-             *
-             * TAC(8 digits) - SNR(6 digits) - SVN(2 digits)
-             * IMEISV(16 digits) ==> 8bytes
-             */
-            if (imeisv->length == sizeof(ogs_nas_mobile_identity_imeisv_t)) {
+        /* Check the container before reading even its identity type. */
+        if (imeisv->length != sizeof(*mobile_identity_imeisv)) {
+            ogs_error("[%s] Invalid IMEISV length [%d]",
+                    amf_ue->supi, imeisv->length);
+            ogs_log_hexdump(OGS_LOG_ERROR, imeisv->buffer, imeisv->length);
+        } else {
+            switch (mobile_identity_imeisv->type) {
+            case OGS_NAS_5GS_MOBILE_IDENTITY_IMEISV:
+                /* TS23.003 6.2.2 Composition of IMEISV
+                 *
+                 * The International Mobile station Equipment Identity and
+                 * Software Version Number (IMEISV) is composed.
+                 *
+                 * TAC(8 digits) - SNR(6 digits) - SVN(2 digits)
+                 * IMEISV(16 digits) ==> 8bytes
+                 */
+                if (ogs_nas_imeisv_to_bcd(mobile_identity_imeisv,
+                            imeisv->length, amf_ue->imeisv_bcd) != OGS_OK) {
+                    ogs_error("[%s] Invalid IMEISV encoding", amf_ue->supi);
+                    ogs_log_hexdump(OGS_LOG_ERROR,
+                            imeisv->buffer, imeisv->length);
+                    break;
+                }
                 memcpy(&amf_ue->nas_mobile_identity_imeisv,
                     mobile_identity_imeisv, imeisv->length);
-                ogs_nas_imeisv_to_bcd(mobile_identity_imeisv, imeisv->length,
-                        amf_ue->imeisv_bcd);
                 ogs_nas_imeisv_bcd_to_buffer(amf_ue->imeisv_bcd,
                         amf_ue->masked_imeisv, &amf_ue->masked_imeisv_len);
                 amf_ue->masked_imeisv[5] = 0xff;
@@ -1149,17 +1162,12 @@ ogs_nas_5gmm_cause_t gmm_handle_security_mode_complete(amf_ue_t *amf_ue,
                     ogs_free(amf_ue->pei);
                 amf_ue->pei = ogs_msprintf("imeisv-%s", amf_ue->imeisv_bcd);
                 ogs_assert(amf_ue->pei);
-            } else {
-                ogs_error("[%s] Unknown IMEISV Length [%d]",
-                        amf_ue->supi, imeisv->length);
-                ogs_log_hexdump(OGS_LOG_ERROR, imeisv->buffer, imeisv->length);
+                break;
+            default:
+                ogs_error("[%s] Invalid IMEISV Type [%d]",
+                        amf_ue->supi, mobile_identity_imeisv->type);
+                break;
             }
-            break;
-        default:
-            ogs_warn("[%s] Invalid IMEISV Type [%d]",
-                    amf_ue->supi, mobile_identity_imeisv->type);
-            break;
-
         }
     }
 

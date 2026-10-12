@@ -1350,8 +1350,16 @@ void amf_gnb_remove(amf_gnb_t *gnb)
 
     ogs_hash_set(self.gnb_addr_hash,
             gnb->sctp.addr, sizeof(ogs_sockaddr_t), NULL);
+
+    /*
+     * NG Setup on a new SCTP association may have already replaced this ID
+     * while shutdown of the old association was still pending. Removing
+     * the old context must not erase the replacement's ID mapping. A false
+     * result only skips unindexing; the old context is still torn down.
+     */
     if (gnb->gnb_id_presence == true)
-        ogs_hash_set(self.gnb_id_hash, &gnb->gnb_id, sizeof(gnb->gnb_id), NULL);
+        ogs_hash_unset_if_owner(self.gnb_id_hash,
+                &gnb->gnb_id, sizeof(gnb->gnb_id), gnb);
 
     ogs_sctp_flush_and_destroy(&gnb->sctp);
 
@@ -1392,12 +1400,27 @@ int amf_gnb_set_gnb_id(amf_gnb_t *gnb, uint32_t gnb_id, uint8_t gnb_id_length)
         return OGS_ERROR;
     }
 
+    /*
+     * Remove our previous ID before changing its key bytes, but leave it
+     * alone if another association has already taken over that mapping.
+     */
     if (gnb->gnb_id_presence == true)
-        ogs_hash_set(self.gnb_id_hash, &gnb->gnb_id, sizeof(gnb->gnb_id), NULL);
+        ogs_hash_unset_if_owner(self.gnb_id_hash,
+                &gnb->gnb_id, sizeof(gnb->gnb_id), gnb);
 
     gnb->gnb_id = gnb_id;
     gnb->gnb_id_length = gnb_id_length;
-    ogs_hash_set(self.gnb_id_hash, &gnb->gnb_id, sizeof(gnb->gnb_id), gnb);
+
+    /*
+     * A reconnect can register the same gNB-ID before the old association's
+     * shutdown event is handled. Keep the existing last-registration-wins
+     * mapping, but also replace the key pointer: plain ogs_hash_set() would
+     * retain &old_gnb->gnb_id even though its value now points to this
+     * context. Freeing or reusing the old context could then break lookups
+     * (including handover target lookup), even with owner-checked removal.
+     */
+    ogs_hash_set_rekey(self.gnb_id_hash,
+            &gnb->gnb_id, sizeof(gnb->gnb_id), gnb);
 
     gnb->gnb_id_presence = true;
 
@@ -2957,6 +2980,10 @@ void amf_ue_save_memento(amf_ue_t *amf_ue, amf_ue_memento_t *memento)
     ogs_assert(amf_ue);
     ogs_assert(memento);
 
+    memento->ue_ksi = amf_ue->nas.ue.ksi;
+    memento->ue_tsc = amf_ue->nas.ue.tsc;
+    memento->amf_ksi = amf_ue->nas.amf.ksi;
+    memento->amf_tsc = amf_ue->nas.amf.tsc;
     memcpy(&memento->ue_security_capability, &amf_ue->ue_security_capability,
            sizeof(memento->ue_security_capability));
     memcpy(&memento->ue_network_capability, &amf_ue->ue_network_capability,
@@ -2985,6 +3012,10 @@ void amf_ue_restore_memento(amf_ue_t *amf_ue, const amf_ue_memento_t *memento)
     ogs_assert(amf_ue);
     ogs_assert(memento);
 
+    amf_ue->nas.ue.ksi = memento->ue_ksi;
+    amf_ue->nas.ue.tsc = memento->ue_tsc;
+    amf_ue->nas.amf.ksi = memento->amf_ksi;
+    amf_ue->nas.amf.tsc = memento->amf_tsc;
     memcpy(&amf_ue->ue_security_capability, &memento->ue_security_capability,
            sizeof(amf_ue->ue_security_capability));
     memcpy(&amf_ue->ue_network_capability, &memento->ue_network_capability,
