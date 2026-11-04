@@ -94,12 +94,15 @@ uint8_t mme_s6a_handle_aia(
 
     CLEAR_MME_UE_TIMER(mme_ue->t3460);
 
-    if (mme_ue->nas_eps.mme.ksi < (OGS_NAS_KSI_NO_KEY_IS_AVAILABLE - 1))
-        mme_ue->nas_eps.mme.ksi++;
-    else
-        mme_ue->nas_eps.mme.ksi = 0;
-
-    mme_ue->nas_eps.ue.ksi = mme_ue->nas_eps.mme.ksi;
+    /* Allocate a native eKSI different from the stored and received values.
+     * Keep the initial request's identifier across authentication retries. */
+    mme_ue->nas_eps.mme.tsc = 0;
+    do {
+        if (mme_ue->nas_eps.mme.ksi < (OGS_NAS_KSI_NO_KEY_IS_AVAILABLE - 1))
+            mme_ue->nas_eps.mme.ksi++;
+        else
+            mme_ue->nas_eps.mme.ksi = 0;
+    } while (mme_ue->nas_eps.mme.ksi == mme_ue->nas_eps.ue.ksi);
 
     return OGS_NAS_EMM_CAUSE_REQUEST_ACCEPTED;
 }
@@ -409,8 +412,10 @@ static uint8_t mme_ue_session_from_slice_data(mme_ue_t *mme_ue,
         } else {
             ogs_error("Invalid PDN_TYPE[%d]",
                 slice_data->session[i].session_type);
-            if (mme_ue->session[i].name)
+            if (mme_ue->session[i].name) {
                 ogs_free(mme_ue->session[i].name);
+                mme_ue->session[i].name = NULL;
+            }
             break;
         }
         memcpy(&mme_ue->session[i].ue_ip, &slice_data->session[i].ue_ip,

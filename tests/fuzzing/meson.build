@@ -21,10 +21,12 @@ lib_fuzzing_engine = get_option('lib_fuzzing_engine')
 
 # All fuzzer sources.
 gtp_message_source = files('gtp-message-fuzz.c')
+gtpu_header_source = files('gtpu-header-fuzz.c')
 nas_message_source = files('nas-message-fuzz.c')
 ngap_message_source = files('ngap-message-fuzz.c')
 s1ap_message_source = files('s1ap-message-fuzz.c')
 pfcp_message_source = files('pfcp-message-fuzz.c')
+pfcp_packet_match_source = files('pfcp-packet-match-fuzz.c')
 nas_5gs_message_source = files('nas-5gs-message-fuzz.c')
 sbi_nf_profile_source = files('sbi-nf-profile-fuzz.c')
 sbi_sm_context_source = files('sbi-sm-context-fuzz.c')
@@ -36,6 +38,14 @@ sbi_request_source = files('sbi-request-fuzz.c')
 executable(
     'gtp_message_fuzz',
     sources : gtp_message_source,
+    c_args : [testunit_core_cc_flags, sbi_cc_flags],
+    dependencies : [libgtp_dep],
+    link_args: lib_fuzzing_engine
+)
+
+executable(
+    'gtpu_header_fuzz',
+    sources : gtpu_header_source,
     c_args : [testunit_core_cc_flags, sbi_cc_flags],
     dependencies : [libgtp_dep],
     link_args: lib_fuzzing_engine
@@ -68,6 +78,14 @@ executable(
 executable(
     'pfcp_message_fuzz',
     sources : pfcp_message_source,
+    c_args : [testunit_core_cc_flags, sbi_cc_flags],
+    dependencies : [libpfcp_dep, libcore_dep],
+    link_args: lib_fuzzing_engine
+)
+
+executable(
+    'pfcp_packet_match_fuzz',
+    sources : pfcp_packet_match_source,
     c_args : [testunit_core_cc_flags, sbi_cc_flags],
     dependencies : [libpfcp_dep, libcore_dep],
     link_args: lib_fuzzing_engine

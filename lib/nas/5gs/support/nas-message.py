@@ -732,7 +732,15 @@ for (k, v) in sorted_msg_list:
 
     if [ies for ies in msg_list[k]["ies"] if ies["presence"] != "M"]:
         f.write("""        default:
-            ogs_error("Unknown type(0x%x) or not implemented\\n", type);
+            ogs_warn("Unknown type(0x%x) or not implemented\\n", type);
+            size = ogs_nas_skip_unknown_ie(type, pkbuf,
+                    OGS_NAS_5GS_TLV_E_IEI_MIN);
+            if (size < 0) {
+               ogs_error("ogs_nas_skip_unknown_ie() failed");
+               return size;
+            }
+
+            decoded += size;
             break;
         }
     }

@@ -672,6 +672,9 @@ static void test1_func(abts_case *tc, void *data)
     /* Wait for PCF-Discovery */
     ogs_msleep(100);
 
+    /* Offer 0x72 so the PCF must negotiate it down to 0x12. */
+    af_sess->policyauthorization_features |= 0x60;
+
     /* Send AF-Session : CREATE */
     memset(&af_param, 0, sizeof(af_param));
     af_param.med_type = OpenAPI_media_type_AUDIO;
@@ -721,6 +724,8 @@ static void test1_func(abts_case *tc, void *data)
 
     /* Wait for PDU session resource modify complete */
     ogs_msleep(100);
+
+    ABTS_INT_EQUAL(tc, 0x12, (int)af_sess->policyauthorization_features);
 
     /* Send GTP-U ICMP Packet */
     qos_flow = test_qos_flow_find_by_qfi(sess, 2);
@@ -5039,6 +5044,45 @@ static void test_arp_update_func(abts_case *tc, void *data)
     test_af_qos_reference_cleanup(tc, test_ue, ngap, gtpu);
 }
 
+/*
+ * Issue #4899
+ * Subscription to Notification of Signalling Path Status (no medType)
+ * is accepted by create and update, and no QoS flow is added.
+ */
+static void test_issue4899_func(abts_case *tc, void *data)
+{
+    ogs_socknode_t *ngap = NULL;
+    ogs_socknode_t *gtpu = NULL;
+    test_ue_t *test_ue = NULL;
+    test_sess_t *sess = NULL;
+    af_sess_t *af_sess = NULL;
+
+    test_af_qos_reference_setup(tc, "0000004899",
+            &test_ue, &sess, &af_sess, &ngap, &gtpu);
+
+    af_local_send_to_pcf(af_sess, NULL,
+            af_npcf_policyauthorization_build_create_signalling);
+
+    ogs_msleep(100);
+    ABTS_INT_EQUAL(tc, OGS_SBI_HTTP_STATUS_CREATED,
+            af_sess->last_pcf_status);
+
+    af_local_send_to_pcf(af_sess, NULL,
+            af_npcf_policyauthorization_build_update_signalling);
+
+    ogs_msleep(100);
+    ABTS_INT_EQUAL(tc, OGS_SBI_HTTP_STATUS_OK, af_sess->last_pcf_status);
+
+    ABTS_TRUE(tc, test_qos_flow_find_by_qfi(sess, 2) == NULL);
+
+    af_local_send_to_pcf(af_sess, NULL,
+            af_npcf_policyauthorization_build_delete);
+
+    ogs_msleep(100);
+
+    test_af_qos_reference_cleanup(tc, test_ue, ngap, gtpu);
+}
+
 abts_suite *test_af(abts_suite *suite)
 {
     suite = ADD_SUITE(suite)
@@ -5065,6 +5109,7 @@ abts_suite *test_af(abts_suite *suite)
     abts_run_test(suite, test13_func, NULL);
     abts_run_test(suite, test_issue4672_func, NULL);
     abts_run_test(suite, test_arp_update_func, NULL);
+    abts_run_test(suite, test_issue4899_func, NULL);
 
     return suite;
 }

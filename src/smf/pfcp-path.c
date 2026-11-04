@@ -342,11 +342,21 @@ static void sess_5gc_timeout(ogs_pfcp_xact_t *xact, void *data)
                 trigger == OGS_PFCP_DELETE_TRIGGER_AMF_UPDATE_SM_CONTEXT ||
                 trigger == OGS_PFCP_DELETE_TRIGGER_AMF_RELEASE_SM_CONTEXT) {
 
-            ogs_assert(stream);
-            ogs_assert(true ==
-                ogs_sbi_server_send_error(stream,
-                    OGS_SBI_HTTP_STATUS_GATEWAY_TIMEOUT, NULL, strerror,
-                    NULL, NULL));
+            /* The associated SBI stream may already have been released while
+             * the PFCP transaction was still pending (e.g. the AMF gave up,
+             * or the UE context was cleaned up during churn). Do not abort
+             * the whole SMF in that case: report the timeout only when the
+             * stream is still alive, and let the SMF_EVT_N4_TIMER below
+             * remove the session through the pfcp-sm state machine. */
+            if (stream) {
+                ogs_assert(true ==
+                    ogs_sbi_server_send_error(stream,
+                        OGS_SBI_HTTP_STATUS_GATEWAY_TIMEOUT, NULL, strerror,
+                        NULL, NULL));
+            } else {
+                ogs_warn("No SBI stream for PFCP deletion timeout [%d]",
+                        trigger);
+            }
         } else {
             ogs_fatal("Unknown trigger [%d]", trigger);
             ogs_assert_if_reached();
@@ -433,7 +443,9 @@ static void sess_epc_timeout(ogs_pfcp_xact_t *xact, void *data)
     smf_sess_t *sess = NULL;
     smf_bearer_t *bearer = NULL;
     ogs_pool_id_t sess_id = OGS_INVALID_POOL_ID;
+    smf_event_t *e = NULL;
     uint8_t type;
+    int rv;
 
     ogs_assert(xact);
     type = xact->seq[0].type;
@@ -451,6 +463,18 @@ static void sess_epc_timeout(ogs_pfcp_xact_t *xact, void *data)
     switch (type) {
     case OGS_PFCP_SESSION_ESTABLISHMENT_REQUEST_TYPE:
         ogs_warn("No PFCP session establishment response");
+        e = smf_event_new(SMF_EVT_N4_TIMER);
+        ogs_assert(e);
+        e->sess_id = sess->id;
+        e->h.timer_id = SMF_TIMER_PFCP_NO_ESTABLISHMENT_RESPONSE;
+        e->pfcp_node = sess->pfcp_node;
+        e->gtp_xact_id = xact->assoc_xact_id;
+
+        rv = ogs_queue_push(ogs_app()->queue, e);
+        if (rv != OGS_OK) {
+            ogs_error("ogs_queue_push() failed:%d", (int)rv);
+            ogs_event_free(e);
+        }
         break;
     case OGS_PFCP_SESSION_MODIFICATION_REQUEST_TYPE:
         if (xact->modify_flags & OGS_PFCP_MODIFY_ERROR_INDICATION) {
@@ -602,7 +626,7 @@ int smf_5gc_pfcp_send_session_establishment_request(
  *   over N4 towards another SMF or another PFCP entity in the SMF
  *   as specified in clause 5.22.2 and clause 5.22.3.
  */
-    h.seid = sess->upf_n4_seid;
+    h.seid = 0;
 
     n4buf = smf_n4_build_session_establishment_request(h.type, sess, xact);
     if (!n4buf) {
@@ -845,7 +869,7 @@ int smf_epc_pfcp_send_session_establishment_request(
  *   over N4 towards another SMF or another PFCP entity in the SMF
  *   as specified in clause 5.22.2 and clause 5.22.3.
  */
-    h.seid = sess->upf_n4_seid;
+    h.seid = 0;
 
     n4buf = smf_n4_build_session_establishment_request(h.type, sess, xact);
     if (!n4buf) {

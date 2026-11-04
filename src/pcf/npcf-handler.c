@@ -235,7 +235,14 @@ bool pcf_npcf_am_policy_control_handle_create(pcf_ue_am_t *pcf_ue_am,
     Guami = PolicyAssociationRequest->guami;
     if (Guami && Guami->amf_id &&
         Guami->plmn_id && Guami->plmn_id->mnc && Guami->plmn_id->mcc) {
-        ogs_sbi_parse_guami(&pcf_ue_am->guami, PolicyAssociationRequest->guami);
+        if (!ogs_sbi_parse_guami(
+                &pcf_ue_am->guami, PolicyAssociationRequest->guami)) {
+            ogs_error("[%s] Invalid GUAMI", pcf_ue_am->supi);
+            ogs_assert(true ==
+                ogs_sbi_server_send_error(stream, OGS_SBI_HTTP_STATUS_BAD_REQUEST,
+                    message, "Invalid GUAMI", pcf_ue_am->supi, NULL));
+            return false;
+        }
     }
 
     OpenAPI_list_for_each(PolicyAssociationRequest->allowed_snssais, node) {
@@ -352,9 +359,11 @@ bool pcf_npcf_smpolicycontrol_handle_create(pcf_sess_t *sess,
         goto cleanup;
     }
 
-    if (!SmPolicyContextData->pdu_session_id) {
-        strerror = ogs_msprintf("[%s:%d] No pduSessionId",
-                pcf_ue_sm->supi, sess->psi);
+    if (ogs_pdu_session_id_is_valid(
+            SmPolicyContextData->pdu_session_id) == false) {
+        strerror = ogs_msprintf("[%s:%d] Invalid pduSessionId [%d]",
+                pcf_ue_sm->supi, sess->psi,
+                SmPolicyContextData->pdu_session_id);
         status = OGS_SBI_HTTP_STATUS_BAD_REQUEST;
         goto cleanup;
     }
@@ -735,6 +744,7 @@ bool pcf_npcf_policyauthorization_handle_create(pcf_sess_t *sess,
     OpenAPI_app_session_context_req_data_t *AscReqData = NULL;
 
     uint64_t supported_features = 0;
+    uint64_t negotiated_features = 0;
 
     ogs_sbi_server_t *server = NULL;
     ogs_sbi_header_t header;
@@ -831,12 +841,18 @@ bool pcf_npcf_policyauthorization_handle_create(pcf_sess_t *sess,
 
     supported_features = ogs_uint64_from_string_hexadecimal(
             AscReqData->supp_feat);
-    sess->policyauthorization_features &= supported_features;
 
-    if (sess->policyauthorization_features != supported_features) {
+    /*
+     * Negotiate features for each application session. Do not narrow the
+     * PCF's supported feature set for subsequent AF requests.
+     */
+    negotiated_features =
+        sess->policyauthorization_features & supported_features;
+
+    if (negotiated_features != supported_features) {
         ogs_free(AscReqData->supp_feat);
         AscReqData->supp_feat =
-            ogs_uint64_to_string(sess->policyauthorization_features);
+            ogs_uint64_to_string(negotiated_features);
         ogs_assert(AscReqData->supp_feat);
     }
 
@@ -991,6 +1007,12 @@ bool pcf_npcf_policyauthorization_handle_create(pcf_sess_t *sess,
         ogs_media_component_t *media_component = &ims_data.media_component[i];
         const char *reference = qos_reference[i];
         const char *err_str = NULL;
+
+        if (ogs_media_is_signalling_path_status(media_component)) {
+            ogs_info("[%s:%d] AF subscribed to Signalling Path Status",
+                    pcf_ue_sm->supi, sess->psi);
+            continue;
+        }
 
         qos_index = pcf_qos_index_from_media(
                 reference, media_component->media_type, &err_str);
@@ -1183,6 +1205,22 @@ bool pcf_npcf_policyauthorization_handle_create(pcf_sess_t *sess,
     header.resource.component[1] = (char *)app_session->app_session_id;
     sendmsg.http.location = ogs_sbi_server_uri(server, &header);
     ogs_assert(sendmsg.http.location);
+
+    /*
+     * TS 29.514 requires the negotiated features in ascRespData.suppFeat.
+     * Keep the existing ascReqData.suppFeat echo for older AF clients.
+     * The new response data is owned and freed by recvmsg.
+     */
+    if (AppSessionContext->asc_resp_data)
+        OpenAPI_app_session_context_resp_data_free(
+                AppSessionContext->asc_resp_data);
+
+    AppSessionContext->asc_resp_data =
+        OpenAPI_app_session_context_resp_data_create(
+                OpenAPI_serv_auth_info_NULL, NULL, NULL,
+                ogs_uint64_to_string(negotiated_features));
+    ogs_assert(AppSessionContext->asc_resp_data);
+    ogs_assert(AppSessionContext->asc_resp_data->supp_feat);
 
     sendmsg.AppSessionContext = recvmsg->AppSessionContext;
 
@@ -1477,6 +1515,12 @@ bool pcf_npcf_policyauthorization_handle_update(
         ogs_media_component_t *media_component = &ims_data.media_component[i];
         const char *reference = qos_reference[i];
         const char *err_str = NULL;
+
+        if (ogs_media_is_signalling_path_status(media_component)) {
+            ogs_info("[%s:%d] AF subscribed to Signalling Path Status",
+                    pcf_ue_sm->supi, sess->psi);
+            continue;
+        }
 
         qos_index = pcf_qos_index_from_media(
                 reference, media_component->media_type, &err_str);

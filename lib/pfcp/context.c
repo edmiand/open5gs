@@ -1611,7 +1611,7 @@ static void pdr_teid_hash_register(
     ogs_assert(pdr->sess);
     ogs_assert(!pdr->hash.teid.registered);
 
-    /* ogs_hash keeps this key's address; only the registered PDR owns it. */
+    /* Only the registered PDR owns the TEID's entry and removes it. */
     pdr->hash.teid.key = pdr->f_teid.teid;
     pdr->hash.teid.type = type;
     pdr->hash.teid.registered = true;
@@ -1625,7 +1625,6 @@ static void pdr_teid_hash_register(
 }
 
 /*
- * ogs_hash retains the address of the key instead of copying it.
  * When removing or changing the registered PDR, move a shared TEID
  * to a live PDR so other QFIs can still use the tunnel (#2003).
  */
@@ -2037,13 +2036,12 @@ void ogs_pfcp_far_f_teid_hash_set(ogs_pfcp_far_t *far)
      * The final GTP node pass repeats this check on every accepted
      * modification, so this is expected for each additional QoS flow.
      */
-    if (ogs_hash_get(self.far_f_teid_hash, &key, len))
+    if (ogs_hash_get_or_set(self.far_f_teid_hash, &key, len, far) != far)
         return;
 
+    /* Keep the registered key to remove the entry later. */
     memcpy(&far->hash.f_teid.key, &key, len);
     far->hash.f_teid.len = len;
-    ogs_hash_set(self.far_f_teid_hash,
-            &far->hash.f_teid.key, len, far);
     ogs_info("Register Error Indication F-TEID[0x%x] [FAR-ID:%u]",
             key.teid, far->id);
 }

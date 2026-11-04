@@ -67,26 +67,46 @@ static uint8_t gtp_cause_from_diameter(uint8_t gtp_version,
     }
 }
 
-static void send_gtp_create_err_msg(const smf_sess_t *sess,
+static void send_gtp_error_msg(const smf_sess_t *sess,
         ogs_gtp_xact_t *gtp_xact, uint8_t gtp_cause)
 {
-    if (gtp_xact->gtp_version == 1)
-        ogs_gtp1_send_error_message(gtp_xact, sess->sgw_s5c_teid,
-            OGS_GTP1_CREATE_PDP_CONTEXT_RESPONSE_TYPE, gtp_cause);
-    else
-        ogs_gtp2_send_error_message(gtp_xact, sess->sgw_s5c_teid,
-            OGS_GTP2_CREATE_SESSION_RESPONSE_TYPE, gtp_cause);
-}
+    uint8_t response_type = 0;
 
-static void send_gtp_delete_err_msg(const smf_sess_t *sess,
-        ogs_gtp_xact_t *gtp_xact, uint8_t gtp_cause)
-{
-    if (gtp_xact->gtp_version == 1)
-        ogs_gtp1_send_error_message(gtp_xact, sess->sgw_s5c_teid,
-            OGS_GTP1_DELETE_PDP_CONTEXT_RESPONSE_TYPE, gtp_cause);
-    else
-        ogs_gtp2_send_error_message(gtp_xact, sess->sgw_s5c_teid,
-            OGS_GTP2_DELETE_SESSION_RESPONSE_TYPE, gtp_cause);
+    ogs_assert(sess);
+    ogs_assert(gtp_xact);
+
+    switch (gtp_xact->gtp_version) {
+    case 1:
+        switch (gtp_xact->seq[0].type) {
+        case OGS_GTP1_CREATE_PDP_CONTEXT_REQUEST_TYPE:
+            response_type = OGS_GTP1_CREATE_PDP_CONTEXT_RESPONSE_TYPE;
+            break;
+        case OGS_GTP1_DELETE_PDP_CONTEXT_REQUEST_TYPE:
+            response_type = OGS_GTP1_DELETE_PDP_CONTEXT_RESPONSE_TYPE;
+            break;
+        }
+        break;
+    case 2:
+        switch (gtp_xact->seq[0].type) {
+        case OGS_GTP2_CREATE_SESSION_REQUEST_TYPE:
+            response_type = OGS_GTP2_CREATE_SESSION_RESPONSE_TYPE;
+            break;
+        case OGS_GTP2_DELETE_SESSION_REQUEST_TYPE:
+            response_type = OGS_GTP2_DELETE_SESSION_RESPONSE_TYPE;
+            break;
+        }
+        break;
+    }
+
+    if (!response_type) {
+        ogs_fatal("Unsupported GTP request [version:%u,type:%u]",
+                gtp_xact->gtp_version, gtp_xact->seq[0].type);
+        ogs_assert_if_reached();
+        return;
+    }
+
+    ogs_gtp_send_error_message(
+            gtp_xact, sess->sgw_s5c_teid, response_type, gtp_cause);
 }
 
 static bool send_ccr_init_req_gx_gy(smf_sess_t *sess, ogs_gtp_xact_t *gtp_xact)
@@ -99,7 +119,7 @@ static bool send_ccr_init_req_gx_gy(smf_sess_t *sess, ogs_gtp_xact_t *gtp_xact)
         uint8_t gtp_cause = (gtp_xact->gtp_version == 1) ?
                 OGS_GTP1_CAUSE_NO_RESOURCES_AVAILABLE :
                 OGS_GTP2_CAUSE_UE_NOT_AUTHORISED_BY_OCS_OR_EXTERNAL_AAA_SERVER;
-        send_gtp_create_err_msg(sess, gtp_xact, gtp_cause);
+        send_gtp_error_msg(sess, gtp_xact, gtp_cause);
         return false;
     }
 
@@ -137,7 +157,7 @@ static bool send_ccr_termination_req_gx_gy_s6b(
             uint8_t gtp_cause = (gtp_xact->gtp_version == 1) ?
                 OGS_GTP1_CAUSE_NO_RESOURCES_AVAILABLE :
                 OGS_GTP2_CAUSE_UE_NOT_AUTHORISED_BY_OCS_OR_EXTERNAL_AAA_SERVER;
-            send_gtp_delete_err_msg(sess, gtp_xact, gtp_cause);
+            send_gtp_error_msg(sess, gtp_xact, gtp_cause);
         } else {
             ogs_error("No GTP transaction : "
                     "Cannot report 'No Gy Diameter Peer' to the peer");
@@ -160,6 +180,7 @@ static bool send_ccr_termination_req_gx_gy_s6b(
         /* Gy is available,
          * set up session for the bearer before accepting it towards the UE */
         sess->sm_data.gy_ccr_term_in_flight = true;
+        sess->gy.reporting_reason = OGS_DIAM_GY_REPORTING_REASON_FINAL;
         smf_gy_send_ccr(
                 sess, gtp_xact ? gtp_xact->id : OGS_INVALID_POOL_ID,
                 OGS_DIAM_GY_CC_REQUEST_TYPE_TERMINATION_REQUEST);
@@ -295,7 +316,7 @@ void smf_gsm_state_initial(ogs_fsm_t *s, smf_event_t *e)
                             gtp_xact,
                             &e->gtp1_message->create_pdp_context_request);
             if (gtp1_cause != OGS_GTP1_CAUSE_REQUEST_ACCEPTED) {
-                send_gtp_create_err_msg(sess, gtp_xact, gtp1_cause);
+                send_gtp_error_msg(sess, gtp_xact, gtp1_cause);
                 return;
             }
             if (send_ccr_init_req_gx_gy(sess, gtp_xact) == true)
@@ -314,7 +335,7 @@ void smf_gsm_state_initial(ogs_fsm_t *s, smf_event_t *e)
                             gtp_xact,
                             &e->gtp2_message->create_session_request);
             if (gtp2_cause != OGS_GTP2_CAUSE_REQUEST_ACCEPTED) {
-                send_gtp_create_err_msg(sess, gtp_xact, gtp2_cause);
+                send_gtp_error_msg(sess, gtp_xact, gtp2_cause);
                 return;
             }
             switch (sess->gtp_rat_type) {
@@ -654,7 +675,7 @@ test_can_proceed:
             !create_error_sent) {
             uint8_t gtp_cause = gtp_cause_from_diameter(
                                     gtp_xact->gtp_version, diam_err, NULL);
-            send_gtp_create_err_msg(sess, gtp_xact, gtp_cause);
+            send_gtp_error_msg(sess, gtp_xact, gtp_cause);
         }
 
         /* Terminate only sessions confirmed by an Initial answer. In
@@ -887,11 +908,10 @@ void smf_gsm_state_wait_pfcp_establishment(ogs_fsm_t *s, smf_event_t *e)
     smf_sess_t *sess = NULL;
     uint8_t pfcp_cause, gtp_cause;
     smf_n1_n2_message_transfer_param_t param;
-
     ogs_pfcp_xact_t *pfcp_xact = NULL;
     ogs_pfcp_message_t *pfcp_message = NULL;
     int rv;
-
+    ogs_gtp_xact_t *gtp_xact = NULL;
     ogs_sbi_stream_t *stream = NULL;
 
     ogs_assert(s);
@@ -919,8 +939,7 @@ void smf_gsm_state_wait_pfcp_establishment(ogs_fsm_t *s, smf_event_t *e)
         switch (pfcp_message->h.type) {
         case OGS_PFCP_SESSION_ESTABLISHMENT_RESPONSE_TYPE:
             if (pfcp_xact->epc) {
-                ogs_gtp_xact_t *gtp_xact =
-                    ogs_gtp_xact_find_by_id(pfcp_xact->assoc_xact_id);
+                gtp_xact = ogs_gtp_xact_find_by_id(pfcp_xact->assoc_xact_id);
                 ogs_assert(gtp_xact);
 
                 pfcp_cause = smf_epc_n4_handle_session_establishment_response(
@@ -930,7 +949,7 @@ void smf_gsm_state_wait_pfcp_establishment(ogs_fsm_t *s, smf_event_t *e)
                     /* FIXME: tear down Gy and Gx */
                     gtp_cause = gtp_cause_from_pfcp(
                                     pfcp_cause, gtp_xact->gtp_version);
-                    send_gtp_create_err_msg(sess, gtp_xact, gtp_cause);
+                    send_gtp_error_msg(sess, gtp_xact, gtp_cause);
                     return;
                 }
 
@@ -1027,7 +1046,15 @@ void smf_gsm_state_wait_pfcp_establishment(ogs_fsm_t *s, smf_event_t *e)
     case SMF_EVT_N4_TIMER:
         switch (e->h.timer_id) {
         case SMF_TIMER_PFCP_NO_ESTABLISHMENT_RESPONSE:
-            OGS_FSM_TRAN(s, smf_gsm_state_5gc_n1_n2_reject);
+            if (sess->epc) {
+                gtp_xact = ogs_gtp_xact_find_by_id(e->gtp_xact_id);
+                if (send_ccr_termination_req_gx_gy_s6b(sess, gtp_xact) == true)
+                    OGS_FSM_TRAN(s, smf_gsm_state_wait_epc_auth_release);
+                else
+                    OGS_FSM_TRAN(s, smf_gsm_state_session_will_release);
+            } else {
+                OGS_FSM_TRAN(s, smf_gsm_state_5gc_n1_n2_reject);
+            }
             break;
         default:
             ogs_error("Unknown timer[%s:%d]",
@@ -1098,8 +1125,7 @@ void smf_gsm_state_operational(ogs_fsm_t *s, smf_event_t *e)
                             gtp_xact,
                             &gtp1_message->delete_pdp_context_request);
             if (gtp1_cause != OGS_GTP1_CAUSE_REQUEST_ACCEPTED) {
-                ogs_gtp1_send_error_message(gtp_xact, sess->sgw_s5c_teid,
-                        OGS_GTP1_DELETE_PDP_CONTEXT_RESPONSE_TYPE, gtp1_cause);
+                send_gtp_error_msg(sess, gtp_xact, gtp1_cause);
                 return;
             }
             OGS_FSM_TRAN(s, smf_gsm_state_wait_pfcp_deletion);
@@ -1117,8 +1143,7 @@ void smf_gsm_state_operational(ogs_fsm_t *s, smf_event_t *e)
                             sess, gtp_xact,
                             &gtp2_message->delete_session_request);
             if (gtp2_cause != OGS_GTP2_CAUSE_REQUEST_ACCEPTED) {
-                ogs_gtp2_send_error_message(gtp_xact, sess->sgw_s5c_teid,
-                        OGS_GTP2_DELETE_SESSION_RESPONSE_TYPE, gtp2_cause);
+                send_gtp_error_msg(sess, gtp_xact, gtp2_cause);
                 return;
             }
             OGS_FSM_TRAN(s, smf_gsm_state_wait_pfcp_deletion);
@@ -1127,7 +1152,16 @@ void smf_gsm_state_operational(ogs_fsm_t *s, smf_event_t *e)
             release = smf_s5c_handle_delete_bearer_response(
                 sess, gtp_xact, &e->gtp2_message->delete_bearer_response);
             if (release) {
-                OGS_FSM_TRAN(s, smf_gsm_state_wait_pfcp_deletion);
+                if (OGS_FSM_CHECK(&sess->pfcp_node->sm, smf_pfcp_state_associated)) {
+                    OGS_FSM_TRAN(s, smf_gsm_state_wait_pfcp_deletion);
+                } else {
+                    /* Node is not associated so session cannot exist there anymore,
+                     * hence release this session immediately */
+                    if (send_ccr_termination_req_gx_gy_s6b(sess, NULL) == true)
+                        OGS_FSM_TRAN(s, smf_gsm_state_wait_epc_auth_release);
+                    else
+                        OGS_FSM_TRAN(s, smf_gsm_state_session_will_release);
+                    }
             }
             break;
 
@@ -2451,7 +2485,7 @@ void smf_gsm_state_wait_pfcp_deletion(ogs_fsm_t *s, smf_event_t *e)
                     if (gtp_xact) {
                         gtp_cause = gtp_cause_from_pfcp(
                                 pfcp_cause, gtp_xact->gtp_version);
-                        send_gtp_delete_err_msg(sess, gtp_xact, gtp_cause);
+                        send_gtp_error_msg(sess, gtp_xact, gtp_cause);
                     } else {
         /*
          * No peer is waiting for a response, so the session has to be
@@ -3280,24 +3314,51 @@ test_can_proceed:
         /* Initiated by peer request, let's answer: */
         if (gtp_xact) {
             if (diam_err == ER_DIAMETER_SUCCESS) {
-                /*
-                 * 1. MME sends Delete Session Request to SGW/SMF.
-                 * 2. SMF sends Delete Session Response to SGW/MME.
-                 */
                 switch (gtp_xact->gtp_version) {
                 case 1:
-                    smf_gtp1_send_delete_pdp_context_response(
-                                sess, gtp_xact);
+                    switch (gtp_xact->seq[0].type) {
+                    case OGS_GTP1_DELETE_PDP_CONTEXT_REQUEST_TYPE:
+                        smf_gtp1_send_delete_pdp_context_response(
+                                    sess, gtp_xact);
+                        break;
+                    case OGS_GTP1_CREATE_PDP_CONTEXT_REQUEST_TYPE:
+                        send_gtp_error_msg(sess, gtp_xact,
+                                OGS_GTP1_CAUSE_SYSTEM_FAILURE);
+                        break;
+                    default:
+                        ogs_error(
+                            "Replying GTPv1C type %u not implemented!",
+                            gtp_xact->seq[0].type);
+                        break;
+                    }
                     break;
                 case 2:
-                    smf_gtp2_send_delete_session_response(
-                                sess, gtp_xact);
+                    switch (gtp_xact->seq[0].type) {
+                    case OGS_GTP2_DELETE_SESSION_REQUEST_TYPE:
+                        /* Regular path:
+                        * 1. MME sends Delete Session Request to SGW/SMF.
+                        * 2. SMF sends Delete Session Response to SGW/MME.
+                        */
+                        smf_gtp2_send_delete_session_response(
+                            sess, gtp_xact);
+                        break;
+                    case OGS_GTP2_CREATE_SESSION_REQUEST_TYPE:
+                        /* Create Session Request failed (eg. during Diameter or PFCP session establishment). */
+                        send_gtp_error_msg(sess, gtp_xact,
+                                OGS_GTP2_CAUSE_SYSTEM_FAILURE);
+                        break;
+                    default:
+                        ogs_error(
+                            "Replying GTPv2C type %u not implemented!",
+                            gtp_xact->seq[0].type);
+                        break;
+                    }
                     break;
                 }
             } else {
                 uint8_t gtp_cause = gtp_cause_from_diameter(
                                     gtp_xact->gtp_version, diam_err, NULL);
-                send_gtp_delete_err_msg(sess, gtp_xact, gtp_cause);
+                send_gtp_error_msg(sess, gtp_xact, gtp_cause);
             }
         }
         OGS_FSM_TRAN(s, smf_gsm_state_session_will_release);
@@ -3989,6 +4050,7 @@ void smf_gsm_state_5gc_n1_n2_reject(ogs_fsm_t *s, smf_event_t *e)
     smf_sess_t *sess = NULL;
     ogs_sbi_message_t *sbi_message = NULL;
     int service_name_id = OpenAPI_service_name_NULL;
+    int r;
 
     ogs_assert(s);
     ogs_assert(e);
@@ -4000,9 +4062,11 @@ void smf_gsm_state_5gc_n1_n2_reject(ogs_fsm_t *s, smf_event_t *e)
 
     switch (e->h.id) {
     case OGS_FSM_ENTRY_SIG:
+        /*
+         * Tear down in order: SM Policy -> UDM SDM subscription -> Reject.
+         * UECM registration is not done yet at this point.
+         */
         if (PCF_SM_POLICY_ASSOCIATED(sess)) {
-            int r = 0;
-
             memset(&sess->nsmf_param, 0, sizeof(sess->nsmf_param));
 
             sess->nsmf_param.ue_location = true;
@@ -4013,6 +4077,12 @@ void smf_gsm_state_5gc_n1_n2_reject(ogs_fsm_t *s, smf_event_t *e)
                     smf_npcf_smpolicycontrol_build_delete,
                     sess, NULL,
                     OGS_PFCP_DELETE_TRIGGER_AMF_UPDATE_SM_CONTEXT, NULL);
+            ogs_expect(r == OGS_OK);
+        } else if (UDM_SDM_SUBSCRIBED(sess)) {
+            r = smf_sbi_discover_and_send(
+                    OpenAPI_service_name_nudm_sdm, NULL,
+                    smf_nudm_sdm_build_subscription_delete,
+                    sess, NULL, 0, NULL);
             ogs_expect(r == OGS_OK);
         } else {
             smf_namf_comm_send_n1_n2_pdu_establishment_reject(sess, NULL);
@@ -4055,8 +4125,16 @@ void smf_gsm_state_5gc_n1_n2_reject(ogs_fsm_t *s, smf_event_t *e)
                                sessions. */
                         }
 
-                        smf_namf_comm_send_n1_n2_pdu_establishment_reject(
-                                sess, NULL);
+                        if (UDM_SDM_SUBSCRIBED(sess)) {
+                            r = smf_sbi_discover_and_send(
+                                    OpenAPI_service_name_nudm_sdm, NULL,
+                                    smf_nudm_sdm_build_subscription_delete,
+                                    sess, NULL, 0, NULL);
+                            ogs_expect(r == OGS_OK);
+                        } else {
+                            smf_namf_comm_send_n1_n2_pdu_establishment_reject(
+                                    sess, NULL);
+                        }
                         break;
                     DEFAULT
                         ogs_error("[%s:%d] Unknown resource name [%s]",
@@ -4071,6 +4149,33 @@ void smf_gsm_state_5gc_n1_n2_reject(ogs_fsm_t *s, smf_event_t *e)
                 ogs_error("[%s:%d] Invalid resource name [%s]",
                         smf_ue->supi, sess->psi,
                         sbi_message->h.resource.component[0]);
+                OGS_FSM_TRAN(s, smf_gsm_state_exception);
+            END
+            break;
+
+        case OpenAPI_service_name_nudm_sdm:
+            SWITCH(sbi_message->h.resource.component[1])
+            CASE(OGS_SBI_RESOURCE_NAME_SDM_SUBSCRIPTIONS)
+                UDM_SDM_CLEAR(sess);
+
+                if (sbi_message->res_status !=
+                        OGS_SBI_HTTP_STATUS_NO_CONTENT) {
+                    ogs_error("[%s:%d] HTTP response error [%d]",
+                            smf_ue->supi, sess->psi,
+                            sbi_message->res_status);
+                    /* In spite of error from UDM, continue with
+                       session teardown, so as to not leave stale
+                       sessions. */
+                }
+
+                smf_namf_comm_send_n1_n2_pdu_establishment_reject(
+                        sess, NULL);
+                break;
+
+            DEFAULT
+                ogs_error("[%s:%d] Invalid resource name [%s]",
+                        smf_ue->supi, sess->psi,
+                        sbi_message->h.resource.component[1]);
                 OGS_FSM_TRAN(s, smf_gsm_state_exception);
             END
             break;

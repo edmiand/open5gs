@@ -313,15 +313,6 @@ bool udm_nudr_dr_handle_subscription_authentication(
             return false;
         }
 
-        if (!AuthEvent->success) {
-            ogs_error("[%s] No success", udm_ue->suci);
-            ogs_assert(true ==
-                ogs_sbi_server_send_error(
-                    stream, OGS_SBI_HTTP_STATUS_BAD_REQUEST,
-                    recvmsg, "No success", udm_ue->suci, NULL));
-            return false;
-        }
-
         if (!AuthEvent->time_stamp) {
             ogs_error("[%s] No timeStamp", udm_ue->suci);
             ogs_assert(true ==
@@ -863,12 +854,15 @@ bool udm_nudr_dr_handle_smf_registration(
                 return false;
             }
 
-            if (!SmfRegistration->pdu_session_id) {
-                ogs_error("[%s:%d] No pduSessionId", udm_ue->supi, sess->psi);
+            if (ogs_pdu_session_id_is_valid(
+                    SmfRegistration->pdu_session_id) == false) {
+                ogs_error("[%s:%d] Invalid pduSessionId [%d]",
+                        udm_ue->supi, sess->psi,
+                        SmfRegistration->pdu_session_id);
                 ogs_assert(true ==
                     ogs_sbi_server_send_error(
                         stream, OGS_SBI_HTTP_STATUS_BAD_REQUEST,
-                        recvmsg, "No pduSessionId", udm_ue->supi,
+                        recvmsg, "Invalid pduSessionId", udm_ue->supi,
                         NULL));
                 return false;
             }

@@ -246,7 +246,10 @@ ogs_amf_id_t *ogs_amf_id_from_string(ogs_amf_id_t *amf_id, const char *hex)
     ogs_assert(amf_id);
     ogs_assert(hex);
 
-    ogs_hex_from_string(hex, hexbuf, sizeof(hexbuf));
+    if (ogs_hex_from_string_checked(hex, hexbuf, sizeof(hexbuf)) != OGS_OK) {
+        ogs_error("Invalid AMF ID [%s]", hex);
+        return NULL;
+    }
 
     amf_id->region = hexbuf[0];
     amf_id->set1 = hexbuf[1];
@@ -487,6 +490,26 @@ bool ogs_pdu_session_id_is_valid(int psi)
 {
     return psi > OGS_NAS_PDU_SESSION_IDENTITY_UNASSIGNED &&
            psi <= OGS_NAS_PDU_SESSION_IDENTITY_MAX;
+}
+
+int ogs_pdu_session_id_from_string(const char *str)
+{
+    int psi = OGS_NAS_PDU_SESSION_IDENTITY_UNASSIGNED;
+
+    if (!str || !*str)
+        return OGS_NAS_PDU_SESSION_IDENTITY_UNASSIGNED;
+
+    for (; *str; str++) {
+        if (*str < '0' || *str > '9')
+            return OGS_NAS_PDU_SESSION_IDENTITY_UNASSIGNED;
+
+        /* Bound each step so even an arbitrarily long input cannot overflow. */
+        psi = psi * 10 + (*str - '0');
+        if (psi > OGS_NAS_PDU_SESSION_IDENTITY_MAX)
+            return OGS_NAS_PDU_SESSION_IDENTITY_UNASSIGNED;
+    }
+
+    return psi;
 }
 
 /*
@@ -988,13 +1011,16 @@ int ogs_ipv6addr_from_string(uint8_t *addr6, const char *string)
 
 int ogs_ipv6prefix_from_string(uint8_t *addr6, uint8_t *prefixlen, const char *string)
 {
-    int rv;
+    int rv = OGS_ERROR;
     ogs_sockaddr_t tmp;
     char *v = NULL, *pv = NULL, *ipstr = NULL, *mask_or_numbits = NULL;
+    char *endptr = NULL;
+    long bits;
 
     ogs_assert(addr6);
     ogs_assert(prefixlen);
     ogs_assert(string);
+
     pv = v = ogs_strdup(string);
     if (!v) {
         ogs_error("ogs_strdup() failed");
@@ -1002,26 +1028,35 @@ int ogs_ipv6prefix_from_string(uint8_t *addr6, uint8_t *prefixlen, const char *s
     }
 
     ipstr = strsep(&v, "/");
-    if (ipstr)
-        mask_or_numbits = v;
+    mask_or_numbits = v;
 
     if (!ipstr || !mask_or_numbits) {
-        ogs_error("Invalid IPv6 Prefix string = %s", v);
-        ogs_free(v);
-        return OGS_ERROR;
+        ogs_error("Invalid IPv6 Prefix string = %s", string);
+        goto cleanup;
     }
 
-    rv = ogs_inet_pton(AF_INET6, ipstr, &tmp);
-    if (rv != OGS_OK) {
-        ogs_error("ogs_inet_pton() failed");
-        return rv;
+    if (ogs_inet_pton(AF_INET6, ipstr, &tmp) != OGS_OK) {
+        ogs_error("ogs_inet_pton() failed [%s]", string);
+        goto cleanup;
+    }
+
+    /* The prefix length is narrowed into a uint8_t, so out-of-range values
+     * from a peer would wrap (e.g. /384 -> /128) and slip past callers that
+     * gate on an exact length. Parse and range-check it like ogs_ipsubnet(). */
+    bits = strtol(mask_or_numbits, &endptr, 10);
+    if (*mask_or_numbits == '\0' || *endptr != '\0' ||
+            bits < 0 || bits > OGS_IPV6_128_PREFIX_LEN) {
+        ogs_error("Invalid IPv6 prefix length [%s]", string);
+        goto cleanup;
     }
 
     memcpy(addr6, tmp.sin6.sin6_addr.s6_addr, OGS_IPV6_LEN);
-    *prefixlen = atoi(mask_or_numbits);
+    *prefixlen = (uint8_t)bits;
+    rv = OGS_OK;
 
+cleanup:
     ogs_free(pv);
-    return OGS_OK;
+    return rv;
 }
 
 int ogs_check_br_conf(ogs_bitrate_t *br)
@@ -1156,6 +1191,32 @@ void ogs_ims_data_free(ogs_ims_data_t *ims_data)
             }
         }
     }
+}
+
+/*
+ * TS29.214 4.4.5, TS29.514 4.2.6.7
+ * Subscription to Notification of Signalling Path Status
+ *
+ * Media component number 0 with a single AF signalling sub-component
+ * whose flow number is 0. The rest of the attributes shall not be used,
+ * and the PCC rules for AF signalling are expected to be provisioned
+ * already, so no PCC rule is derived from this media component.
+ */
+bool ogs_media_is_signalling_path_status(
+        ogs_media_component_t *media_component)
+{
+    ogs_media_sub_component_t *sub = NULL;
+
+    ogs_assert(media_component);
+
+    if (media_component->media_component_number != 0 ||
+        media_component->num_of_sub != 1)
+        return false;
+
+    sub = &media_component->sub[0];
+
+    return sub->flow_number == 0 &&
+        sub->flow_usage == OGS_FLOW_USAGE_AF_SIGNALLING;
 }
 
 static int flow_rx_to_gx(ogs_flow_t *rx_flow, ogs_flow_t *gx_flow)

@@ -46,6 +46,7 @@ void pcf_state_operational(ogs_fsm_t *s, pcf_event_t *e)
     ogs_sbi_subscription_data_t *subscription_data = NULL;
     ogs_sbi_response_t *response = NULL;
     ogs_sbi_message_t message;
+    OpenAPI_policy_association_request_t *PolicyAssociationRequest = NULL;
 
     ogs_sbi_object_t *sbi_object = NULL;
     ogs_sbi_xact_t *sbi_xact = NULL;
@@ -140,6 +141,22 @@ void pcf_state_operational(ogs_fsm_t *s, pcf_event_t *e)
             break;
 
         case OpenAPI_service_name_npcf_am_policy_control:
+            /* Reject an oversized list before finding or creating UE state. */
+            PolicyAssociationRequest = message.PolicyAssociationRequest;
+            if (PolicyAssociationRequest &&
+                PolicyAssociationRequest->allowed_snssais &&
+                PolicyAssociationRequest->allowed_snssais->count >
+                    OGS_MAX_NUM_OF_SLICE) {
+                ogs_error("Too many allowedSnssais [%ld:%d]",
+                        PolicyAssociationRequest->allowed_snssais->count,
+                        OGS_MAX_NUM_OF_SLICE);
+                ogs_assert(true ==
+                    ogs_sbi_server_send_error(stream,
+                        OGS_SBI_HTTP_STATUS_BAD_REQUEST, &message,
+                        "Too many allowedSnssais", NULL, NULL));
+                break;
+            }
+
             SWITCH(message.h.method)
             CASE(OGS_SBI_HTTP_METHOD_POST)
                 if (message.PolicyAssociationRequest &&
@@ -192,8 +209,17 @@ void pcf_state_operational(ogs_fsm_t *s, pcf_event_t *e)
             CASE(OGS_SBI_RESOURCE_NAME_SM_POLICIES)
                 if (!message.h.resource.component[1]) {
                     if (message.SmPolicyContextData &&
-                        message.SmPolicyContextData->supi &&
-                        message.SmPolicyContextData->pdu_session_id) {
+                        message.SmPolicyContextData->supi) {
+
+                        if (ogs_pdu_session_id_is_valid(
+                                message.SmPolicyContextData->
+                                    pdu_session_id) == false) {
+                            ogs_error("[%s:%d] Invalid PDU session identity",
+                                    message.SmPolicyContextData->supi,
+                                    message.SmPolicyContextData->
+                                        pdu_session_id);
+                            break;
+                        }
 
                         pcf_ue_sm = pcf_ue_sm_find_by_supi(
                                     message.SmPolicyContextData->supi);
@@ -416,53 +442,8 @@ void pcf_state_operational(ogs_fsm_t *s, pcf_event_t *e)
                 break;
 
             CASE(OGS_SBI_RESOURCE_NAME_SUBSCRIPTIONS)
-                subscription_data = e->h.sbi.data;
-                ogs_assert(subscription_data);
-
-                SWITCH(message.h.method)
-                CASE(OGS_SBI_HTTP_METHOD_POST)
-                    if (message.res_status == OGS_SBI_HTTP_STATUS_CREATED ||
-                        message.res_status == OGS_SBI_HTTP_STATUS_OK) {
-                        ogs_nnrf_nfm_handle_nf_status_subscribe(
-                                subscription_data, &message);
-                    } else {
-                        ogs_error("HTTP response error : %d",
-                                message.res_status);
-                    }
-                    break;
-
-                CASE(OGS_SBI_HTTP_METHOD_PATCH)
-                    if (message.res_status == OGS_SBI_HTTP_STATUS_OK ||
-                        message.res_status == OGS_SBI_HTTP_STATUS_NO_CONTENT) {
-                        ogs_nnrf_nfm_handle_nf_status_update(
-                                subscription_data, &message);
-                    } else {
-                        ogs_error("[%s] HTTP response error [%d]",
-                                subscription_data->id ?
-                                    subscription_data->id : "Unknown",
-                                message.res_status);
-                    }
-                    break;
-
-                CASE(OGS_SBI_HTTP_METHOD_DELETE)
-                    if (message.res_status == OGS_SBI_HTTP_STATUS_NO_CONTENT)
-                        ogs_info("[%s] Subscription deleted",
-                                subscription_data->id ?
-                                    subscription_data->id : "Unknown");
-                    else
-                        ogs_error("[%s] HTTP response error [%d]",
-                                subscription_data->id ?
-                                    subscription_data->id : "Unknown",
-                                message.res_status);
-
-                    ogs_sbi_subscription_data_remove(subscription_data);
-                    break;
-
-                DEFAULT
-                    ogs_error("[%s] Invalid HTTP method [%s]",
-                            subscription_data->id, message.h.method);
-                    ogs_assert_if_reached();
-                END
+                ogs_nnrf_nfm_handle_nf_status_subscription_response(
+                        &message, e->h.sbi.data);
                 break;
             
             DEFAULT
@@ -533,10 +514,19 @@ void pcf_state_operational(ogs_fsm_t *s, pcf_event_t *e)
                     ogs_assert(pcf_ue_am_id >= OGS_MIN_POOL_ID &&
                             pcf_ue_am_id <= OGS_MAX_POOL_ID);
 
+                    /*
+                     * The AM policy FSM expects a stream ID in e->h.sbi.data,
+                     * but the SBI client event initially carries a UDR
+                     * transaction ID. Without a valid association, clear it
+                     * to prevent an unrelated stream from being selected.
+                     */
                     if (sbi_xact->assoc_stream_id >= OGS_MIN_POOL_ID &&
                         sbi_xact->assoc_stream_id <= OGS_MAX_POOL_ID)
                         e->h.sbi.data =
                             OGS_UINT_TO_POINTER(sbi_xact->assoc_stream_id);
+                    else
+                        e->h.sbi.data =
+                            OGS_UINT_TO_POINTER(OGS_INVALID_POOL_ID);
 
                     ogs_sbi_xact_remove(sbi_xact);
 
@@ -577,10 +567,18 @@ void pcf_state_operational(ogs_fsm_t *s, pcf_event_t *e)
                     ogs_assert(sess_id >= OGS_MIN_POOL_ID &&
                             sess_id <= OGS_MAX_POOL_ID);
 
+                    /*
+                     * The SM policy FSM also interprets this field as a
+                     * stream ID. Do not leave the UDR transaction ID when
+                     * there is no valid stream association.
+                     */
                     if (sbi_xact->assoc_stream_id >= OGS_MIN_POOL_ID &&
                         sbi_xact->assoc_stream_id <= OGS_MAX_POOL_ID)
                         e->h.sbi.data =
                             OGS_UINT_TO_POINTER(sbi_xact->assoc_stream_id);
+                    else
+                        e->h.sbi.data =
+                            OGS_UINT_TO_POINTER(OGS_INVALID_POOL_ID);
 
                     ogs_sbi_xact_remove(sbi_xact);
 
@@ -639,10 +637,19 @@ void pcf_state_operational(ogs_fsm_t *s, pcf_event_t *e)
                 ogs_assert(sess_id >= OGS_MIN_POOL_ID &&
                         sess_id <= OGS_MAX_POOL_ID);
 
+                /*
+                 * The BSF response also arrives with a transaction ID.
+                 * Clear the event data if no originating stream is
+                 * associated, so the policy FSM cannot use that ID
+                 * to look up an unrelated stream.
+                 */
                 if (sbi_xact->assoc_stream_id >= OGS_MIN_POOL_ID &&
                     sbi_xact->assoc_stream_id <= OGS_MAX_POOL_ID)
                     e->h.sbi.data = OGS_UINT_TO_POINTER(
                             sbi_xact->assoc_stream_id);
+                else
+                    e->h.sbi.data =
+                        OGS_UINT_TO_POINTER(OGS_INVALID_POOL_ID);
 
                 ogs_sbi_xact_remove(sbi_xact);
 
@@ -694,9 +701,15 @@ void pcf_state_operational(ogs_fsm_t *s, pcf_event_t *e)
         case OGS_TIMER_NF_INSTANCE_HEARTBEAT_INTERVAL:
         case OGS_TIMER_NF_INSTANCE_NO_HEARTBEAT:
         case OGS_TIMER_NF_INSTANCE_VALIDITY:
-            nf_instance = e->h.sbi.data;
-            ogs_assert(nf_instance);
+            nf_instance = ogs_sbi_nf_instance_find_by_pool_id(
+                    OGS_POINTER_TO_UINT(e->h.sbi.data));
+            if (!nf_instance) {
+                ogs_error("NF Instance has already been removed [%d]",
+                        (int)OGS_POINTER_TO_UINT(e->h.sbi.data));
+                break;
+            }
             ogs_assert(OGS_FSM_STATE(&nf_instance->sm));
+            e->h.sbi.data = nf_instance;
 
             ogs_sbi_self()->nf_instance->load = pcf_instance_get_load();
 
@@ -708,8 +721,13 @@ void pcf_state_operational(ogs_fsm_t *s, pcf_event_t *e)
             break;
 
         case OGS_TIMER_SUBSCRIPTION_VALIDITY:
-            subscription_data = e->h.sbi.data;
-            ogs_assert(subscription_data);
+            subscription_data = ogs_sbi_subscription_data_find_by_pool_id(
+                    OGS_POINTER_TO_UINT(e->h.sbi.data));
+            if (!subscription_data) {
+                ogs_error("Subscription has already been removed [%d]",
+                        (int)OGS_POINTER_TO_UINT(e->h.sbi.data));
+                break;
+            }
 
             ogs_error("[%s] Subscription validity expired",
                     subscription_data->id ?
@@ -724,8 +742,13 @@ void pcf_state_operational(ogs_fsm_t *s, pcf_event_t *e)
             break;
 
         case OGS_TIMER_SUBSCRIPTION_PATCH:
-            subscription_data = e->h.sbi.data;
-            ogs_assert(subscription_data);
+            subscription_data = ogs_sbi_subscription_data_find_by_pool_id(
+                    OGS_POINTER_TO_UINT(e->h.sbi.data));
+            if (!subscription_data) {
+                ogs_error("Subscription has already been removed [%d]",
+                        (int)OGS_POINTER_TO_UINT(e->h.sbi.data));
+                break;
+            }
 
             if (ogs_nnrf_nfm_send_nf_status_update(subscription_data) != true)
                 ogs_error("[%s] NF status subscription update failed",

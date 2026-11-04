@@ -353,6 +353,8 @@ struct amf_ue_s {
         uint8_t message_type; /* Type of last specific NAS message received */
         int access_type; /* 3GPP or Non-3GPP */
 
+        /* AMF-selected context identifier and the last received request's
+         * identifier. Authentication must not overwrite the received value. */
         struct {
         ED3(uint8_t tsc:1;,
             uint8_t ksi:3;,
@@ -461,11 +463,12 @@ struct amf_ue_s {
         bool s1_mode;
     } gmm_capability;
 
+/* Received ngKSI values are checked separately by the NAS procedures. */
 #define SECURITY_CONTEXT_IS_VALID(__aMF) \
     ((__aMF) && \
     ((__aMF)->security_context_available == 1) && \
      ((__aMF)->mac_failed == 0) && \
-     ((__aMF)->nas.ue.ksi != OGS_NAS_KSI_NO_KEY_IS_AVAILABLE))
+     ((__aMF)->nas.amf.ksi != OGS_NAS_KSI_NO_KEY_IS_AVAILABLE))
 #define CLEAR_SECURITY_CONTEXT(__aMF) \
     do { \
         ogs_assert((__aMF)); \
@@ -693,6 +696,19 @@ struct amf_ue_s {
         (__aMF)->ran_ue_holding_id = OGS_INVALID_POOL_ID; \
     } while(0)
     ogs_pool_id_t   ran_ue_holding_id;
+
+    /*
+     * N2 handovers this UE has been through, counted where the AMF is certain.
+     *
+     * A handover that is commanded and then simply never completes is not
+     * counted anywhere: the AMF has no guard timer for one, and the UE
+     * re-attaching afterwards is indistinguishable from an ordinary power
+     * cycle. attempted less completed less rejected is therefore the number
+     * that failed silently, which is the number worth looking at.
+     */
+    uint32_t        ho_attempted;
+    uint32_t        ho_completed;
+    uint32_t        ho_rejected;
 
 #define CLEAR_AMF_UE_ALL_TIMERS(__aMF) \
     do { \

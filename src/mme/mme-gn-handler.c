@@ -287,7 +287,9 @@ static mme_sess_t *mme_ue_session_from_gtp1_pdp_ctx(mme_ue_t *mme_ue, const ogs_
         ogs_assert(sess);
     }
 
-    sess->session = ogs_sess;
+    mme_sess_set_session(sess, ogs_sess);
+    if (!sess->session->session_type)
+        sess->session->session_type = gtp1_pdp_ctx->pdp_type_num[0];
     sess->pgw_s5c_teid = gtp1_pdp_ctx->ul_teic;
     sess->pgw_s5c_ip = gtp1_pdp_ctx->ggsn_address_c;
     ogs_ip_to_paa(&gtp1_pdp_ctx->pdp_address[0], &sess->paa);
@@ -445,6 +447,8 @@ int mme_gn_handle_sgsn_context_response(
              ogs_min(gtp1_mm_ctx.ms_network_capability_len, sizeof(mme_ue->ms_network_capability) - 1));
     /* TODO: how to fill first byte of mme_ue->ms_network_capability ? */
 
+    /* The KASME derived from the SGSN context is a mapped EPS context. */
+    mme_ue->nas_eps.mme.tsc = 1;
     mme_ue->nas_eps.mme.ksi = gtp1_mm_ctx.ksi;
     /* 3GPP TS 33.401 A.10, A.11: */
     mme_ue->noncemme = ogs_random32();

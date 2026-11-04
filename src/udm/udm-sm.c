@@ -40,7 +40,7 @@ void udm_state_operational(ogs_fsm_t *s, udm_event_t *e)
     int service_name_id = OpenAPI_service_name_NULL;
     const char *api_version = NULL;
     char *supi = NULL;
-    uint8_t psi = OGS_NAS_PDU_SESSION_IDENTITY_UNASSIGNED;
+    int psi = OGS_NAS_PDU_SESSION_IDENTITY_UNASSIGNED;
 
     ogs_sbi_stream_t *stream = NULL;
     ogs_pool_id_t stream_id = OGS_INVALID_POOL_ID;
@@ -212,6 +212,25 @@ void udm_state_operational(ogs_fsm_t *s, udm_event_t *e)
                 break;
             }
 
+            if (service_name_id == OpenAPI_service_name_nudm_ueau &&
+                message.h.resource.component[1] &&
+                !strcmp(message.h.resource.component[1],
+                    OGS_SBI_RESOURCE_NAME_AUTH_EVENTS) &&
+                !strcmp(message.h.method, OGS_SBI_HTTP_METHOD_PUT)) {
+                if (!message.h.resource.component[2] ||
+                    strcmp(message.h.resource.component[2], udm_ue->ctx_id) ||
+                    strcmp(message.h.resource.component[0], udm_ue->supi) ||
+                    !udm_ue->auth_event) {
+                    ogs_error("[%s] Authentication event not found",
+                        message.h.resource.component[0]);
+                    ogs_assert(true == ogs_sbi_server_send_error(stream,
+                        OGS_SBI_HTTP_STATUS_NOT_FOUND, &message,
+                        "Authentication event not found",
+                        message.h.resource.component[0], NULL));
+                    break;
+                }
+            }
+
             SWITCH(message.h.resource.component[2])
             CASE(OGS_SBI_RESOURCE_NAME_SMF_REGISTRATIONS)
                 if (!message.h.resource.component[3]) {
@@ -223,14 +242,15 @@ void udm_state_operational(ogs_fsm_t *s, udm_event_t *e)
                     break;
                 }
 
-                psi = atoi(message.h.resource.component[3]);
-                if (psi == OGS_NAS_PDU_SESSION_IDENTITY_UNASSIGNED) {
-                    ogs_error("PDU Session Identitiy unassigned [%s]",
+                psi = ogs_pdu_session_id_from_string(
+                        message.h.resource.component[3]);
+                if (ogs_pdu_session_id_is_valid(psi) == false) {
+                    ogs_error("Invalid PDU Session Identity [%s]",
                             message.h.resource.component[3]);
                     ogs_assert(true ==
                         ogs_sbi_server_send_error(stream,
                             OGS_SBI_HTTP_STATUS_BAD_REQUEST,
-                            &message, "PDU Session Identitiy unassigned",
+                            &message, "Invalid PDU Session Identity",
                             message.h.resource.component[3], NULL));
                     break;
                 }
@@ -348,53 +368,8 @@ void udm_state_operational(ogs_fsm_t *s, udm_event_t *e)
                 break;
 
             CASE(OGS_SBI_RESOURCE_NAME_SUBSCRIPTIONS)
-                subscription_data = e->h.sbi.data;
-                ogs_assert(subscription_data);
-
-                SWITCH(message.h.method)
-                CASE(OGS_SBI_HTTP_METHOD_POST)
-                    if (message.res_status == OGS_SBI_HTTP_STATUS_CREATED ||
-                        message.res_status == OGS_SBI_HTTP_STATUS_OK) {
-                        ogs_nnrf_nfm_handle_nf_status_subscribe(
-                                subscription_data, &message);
-                    } else {
-                        ogs_error("HTTP response error : %d",
-                                message.res_status);
-                    }
-                    break;
-
-                CASE(OGS_SBI_HTTP_METHOD_PATCH)
-                    if (message.res_status == OGS_SBI_HTTP_STATUS_OK ||
-                        message.res_status == OGS_SBI_HTTP_STATUS_NO_CONTENT) {
-                        ogs_nnrf_nfm_handle_nf_status_update(
-                                subscription_data, &message);
-                    } else {
-                        ogs_error("[%s] HTTP response error [%d]",
-                                subscription_data->id ?
-                                    subscription_data->id : "Unknown",
-                                message.res_status);
-                    }
-                    break;
-
-                CASE(OGS_SBI_HTTP_METHOD_DELETE)
-                    if (message.res_status == OGS_SBI_HTTP_STATUS_NO_CONTENT)
-                        ogs_info("[%s] Subscription deleted",
-                                subscription_data->id ?
-                                    subscription_data->id : "Unknown");
-                    else
-                        ogs_error("[%s] HTTP response error [%d]",
-                                subscription_data->id ?
-                                    subscription_data->id : "Unknown",
-                                message.res_status);
-
-                    ogs_sbi_subscription_data_remove(subscription_data);
-                    break;
-
-                DEFAULT
-                    ogs_error("[%s] Invalid HTTP method [%s]",
-                            subscription_data->id, message.h.method);
-                    ogs_assert_if_reached();
-                END
+                ogs_nnrf_nfm_handle_nf_status_subscription_response(
+                        &message, e->h.sbi.data);
                 break;
             
             DEFAULT
@@ -465,10 +440,20 @@ void udm_state_operational(ogs_fsm_t *s, udm_event_t *e)
                     ogs_assert(sess_id >= OGS_MIN_POOL_ID &&
                             sess_id <= OGS_MAX_POOL_ID);
 
+                    /*
+                     * The SBI client event initially carries a UDR transaction
+                     * ID, but the session FSM expects an HTTP stream ID.
+                     * Although UDM normally associates these requests with a
+                     * stream, clear the ID if no valid association exists.
+                     * Otherwise, the transaction ID could match another stream.
+                     */
                     if (sbi_xact->assoc_stream_id >= OGS_MIN_POOL_ID &&
                         sbi_xact->assoc_stream_id <= OGS_MAX_POOL_ID)
                         e->h.sbi.data =
                             OGS_UINT_TO_POINTER(sbi_xact->assoc_stream_id);
+                    else
+                        e->h.sbi.data =
+                            OGS_UINT_TO_POINTER(OGS_INVALID_POOL_ID);
 
                     ogs_sbi_xact_remove(sbi_xact);
 
@@ -514,10 +499,18 @@ void udm_state_operational(ogs_fsm_t *s, udm_event_t *e)
                     ogs_assert(udm_ue_id >= OGS_MIN_POOL_ID &&
                             udm_ue_id <= OGS_MAX_POOL_ID);
 
+                    /*
+                     * The UE FSM also expects a stream ID, not the original
+                     * UDR transaction ID. Clear it if there is no valid
+                     * stream association to avoid using an unrelated stream.
+                     */
                     if (sbi_xact->assoc_stream_id >= OGS_MIN_POOL_ID &&
                         sbi_xact->assoc_stream_id <= OGS_MAX_POOL_ID)
                         e->h.sbi.data =
                             OGS_UINT_TO_POINTER(sbi_xact->assoc_stream_id);
+                    else
+                        e->h.sbi.data =
+                            OGS_UINT_TO_POINTER(OGS_INVALID_POOL_ID);
 
                     e->h.sbi.state = sbi_xact->state;
 
@@ -564,9 +557,15 @@ void udm_state_operational(ogs_fsm_t *s, udm_event_t *e)
         case OGS_TIMER_NF_INSTANCE_HEARTBEAT_INTERVAL:
         case OGS_TIMER_NF_INSTANCE_NO_HEARTBEAT:
         case OGS_TIMER_NF_INSTANCE_VALIDITY:
-            nf_instance = e->h.sbi.data;
-            ogs_assert(nf_instance);
+            nf_instance = ogs_sbi_nf_instance_find_by_pool_id(
+                    OGS_POINTER_TO_UINT(e->h.sbi.data));
+            if (!nf_instance) {
+                ogs_error("NF Instance has already been removed [%d]",
+                        (int)OGS_POINTER_TO_UINT(e->h.sbi.data));
+                break;
+            }
             ogs_assert(OGS_FSM_STATE(&nf_instance->sm));
+            e->h.sbi.data = nf_instance;
 
             ogs_sbi_self()->nf_instance->load = get_ue_load();
 
@@ -578,8 +577,13 @@ void udm_state_operational(ogs_fsm_t *s, udm_event_t *e)
             break;
 
         case OGS_TIMER_SUBSCRIPTION_VALIDITY:
-            subscription_data = e->h.sbi.data;
-            ogs_assert(subscription_data);
+            subscription_data = ogs_sbi_subscription_data_find_by_pool_id(
+                    OGS_POINTER_TO_UINT(e->h.sbi.data));
+            if (!subscription_data) {
+                ogs_error("Subscription has already been removed [%d]",
+                        (int)OGS_POINTER_TO_UINT(e->h.sbi.data));
+                break;
+            }
 
             ogs_error("[%s] Subscription validity expired",
                     subscription_data->id ?
@@ -594,8 +598,13 @@ void udm_state_operational(ogs_fsm_t *s, udm_event_t *e)
             break;
 
         case OGS_TIMER_SUBSCRIPTION_PATCH:
-            subscription_data = e->h.sbi.data;
-            ogs_assert(subscription_data);
+            subscription_data = ogs_sbi_subscription_data_find_by_pool_id(
+                    OGS_POINTER_TO_UINT(e->h.sbi.data));
+            if (!subscription_data) {
+                ogs_error("Subscription has already been removed [%d]",
+                        (int)OGS_POINTER_TO_UINT(e->h.sbi.data));
+                break;
+            }
 
             if (ogs_nnrf_nfm_send_nf_status_update(subscription_data) != true)
                 ogs_error("[%s] NF status subscription update failed",

@@ -153,6 +153,31 @@ void sepp_state_operational(ogs_fsm_t *s, sepp_event_t *e)
                 CASE(OGS_SBI_HTTP_METHOD_POST)
                     if (message.SecNegotiateReqData &&
                         message.SecNegotiateReqData->sender) {
+                        /*
+                         * The JSON sender selects the peer to update.
+                         * Check that the verified client certificate covers
+                         * this name before looking up or creating the peer.
+                         * This prevents a client from modifying the state of
+                         * a peer identity its certificate does not cover.
+                         * PLMN authorization is a separate policy.
+                         */
+                        if (server->verify_client &&
+                            !ogs_sbi_server_verify_client_identity(stream,
+                                message.SecNegotiateReqData->sender)) {
+                            ogs_error("Certificate identity mismatch Sender [%s]",
+                                    message.SecNegotiateReqData->sender);
+                            ogs_assert(true == ogs_sbi_server_send_error(stream,
+                                        OGS_SBI_HTTP_STATUS_FORBIDDEN, &message,
+                                        "Certificate identity mismatch",
+                                        message.SecNegotiateReqData->sender,
+                                        NULL));
+                            /*
+                             * Return before peer dispatch; the common message
+                             * cleanup below will not run on this path.
+                             */
+                            ogs_sbi_message_free(&message);
+                            return;
+                        }
                         sepp_node = sepp_node_find_by_receiver(
                                 message.SecNegotiateReqData->sender);
                         if (!sepp_node) {
@@ -306,52 +331,8 @@ void sepp_state_operational(ogs_fsm_t *s, sepp_event_t *e)
                 break;
 
             CASE(OGS_SBI_RESOURCE_NAME_SUBSCRIPTIONS)
-                subscription_data = e->h.sbi.data;
-                ogs_assert(subscription_data);
-
-                SWITCH(message.h.method)
-                CASE(OGS_SBI_HTTP_METHOD_POST)
-                    if (message.res_status == OGS_SBI_HTTP_STATUS_CREATED ||
-                        message.res_status == OGS_SBI_HTTP_STATUS_OK) {
-                        ogs_nnrf_nfm_handle_nf_status_subscribe(
-                                subscription_data, &message);
-                    } else {
-                        ogs_error("HTTP response error : %d",
-                                message.res_status);
-                    }
-                    break;
-
-                CASE(OGS_SBI_HTTP_METHOD_PATCH)
-                    if (message.res_status == OGS_SBI_HTTP_STATUS_OK ||
-                        message.res_status == OGS_SBI_HTTP_STATUS_NO_CONTENT) {
-                        ogs_nnrf_nfm_handle_nf_status_update(
-                                subscription_data, &message);
-                    } else {
-                        ogs_error("[%s] HTTP response error [%d]",
-                                subscription_data->id ?
-                                    subscription_data->id : "Unknown",
-                                message.res_status);
-                    }
-                    break;
-
-                CASE(OGS_SBI_HTTP_METHOD_DELETE)
-                    if (message.res_status == OGS_SBI_HTTP_STATUS_NO_CONTENT)
-                        ogs_info("[%s] Subscription deleted",
-                                subscription_data->id ?
-                                    subscription_data->id : "Unknown");
-                    else
-                        ogs_error("[%s] HTTP response error [%d]",
-                                subscription_data->id ?
-                                    subscription_data->id : "Unknown",
-                                message.res_status);
-
-                    ogs_sbi_subscription_data_remove(subscription_data);
-                    break;
-
-                DEFAULT
-                    ogs_error("Invalid HTTP method [%s]", message.h.method);
-                    ogs_assert_if_reached();
-                END
+                ogs_nnrf_nfm_handle_nf_status_subscription_response(
+                        &message, e->h.sbi.data);
                 break;
 
             DEFAULT
@@ -409,9 +390,15 @@ void sepp_state_operational(ogs_fsm_t *s, sepp_event_t *e)
         case OGS_TIMER_NF_INSTANCE_HEARTBEAT_INTERVAL:
         case OGS_TIMER_NF_INSTANCE_NO_HEARTBEAT:
         case OGS_TIMER_NF_INSTANCE_VALIDITY:
-            nf_instance = e->h.sbi.data;
-            ogs_assert(nf_instance);
+            nf_instance = ogs_sbi_nf_instance_find_by_pool_id(
+                    OGS_POINTER_TO_UINT(e->h.sbi.data));
+            if (!nf_instance) {
+                ogs_error("NF Instance has already been removed [%d]",
+                        (int)OGS_POINTER_TO_UINT(e->h.sbi.data));
+                break;
+            }
             ogs_assert(OGS_FSM_STATE(&nf_instance->sm));
+            e->h.sbi.data = nf_instance;
 
             ogs_fsm_dispatch(&nf_instance->sm, e);
             if (OGS_FSM_CHECK(&nf_instance->sm, ogs_sbi_nf_state_exception))
@@ -421,8 +408,13 @@ void sepp_state_operational(ogs_fsm_t *s, sepp_event_t *e)
             break;
 
         case OGS_TIMER_SUBSCRIPTION_VALIDITY:
-            subscription_data = e->h.sbi.data;
-            ogs_assert(subscription_data);
+            subscription_data = ogs_sbi_subscription_data_find_by_pool_id(
+                    OGS_POINTER_TO_UINT(e->h.sbi.data));
+            if (!subscription_data) {
+                ogs_error("Subscription has already been removed [%d]",
+                        (int)OGS_POINTER_TO_UINT(e->h.sbi.data));
+                break;
+            }
 
             ogs_error("[%s] Subscription validity expired",
                     subscription_data->id ?
@@ -437,8 +429,13 @@ void sepp_state_operational(ogs_fsm_t *s, sepp_event_t *e)
             break;
 
         case OGS_TIMER_SUBSCRIPTION_PATCH:
-            subscription_data = e->h.sbi.data;
-            ogs_assert(subscription_data);
+            subscription_data = ogs_sbi_subscription_data_find_by_pool_id(
+                    OGS_POINTER_TO_UINT(e->h.sbi.data));
+            if (!subscription_data) {
+                ogs_error("Subscription has already been removed [%d]",
+                        (int)OGS_POINTER_TO_UINT(e->h.sbi.data));
+                break;
+            }
 
             if (ogs_nnrf_nfm_send_nf_status_update(subscription_data) != true)
                 ogs_error("[%s] NF status subscription update failed",

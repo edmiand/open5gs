@@ -500,6 +500,9 @@ struct mme_ue_s {
 #define MME_EPS_TYPE_DETACH_REQUEST_TO_UE           6
         uint8_t     type;
 
+        /* mme identifies the stored EPS NAS security context. ue records
+         * the received identifier; short Service Request infers its TSC
+         * from the current context because the message carries only KSI. */
         struct {
         ED3(uint8_t tsc:1;,
             uint8_t ksi:3;,
@@ -576,6 +579,9 @@ struct mme_ue_s {
         ogs_pool_id_t   gtp_xact_id; /* 2g->4g SGSN Context Req/Resp/Ack gtp1c xact */
     } gn;
 
+    /* Received TAU identity, separate from the pending GUTI allocation. */
+    ogs_nas_eps_guti_t old_guti;
+
     struct {
 #define MME_NEXT_GUTI_IS_AVAILABLE(__mME) ((__mME)->next.m_tmsi)
 #define MME_CURRENT_GUTI_IS_AVAILABLE(__mME) ((__mME)->current.m_tmsi)
@@ -613,7 +619,7 @@ struct mme_ue_s {
     ((__mME) && \
     ((__mME)->security_context_available == 1) && \
      ((__mME)->mac_failed == 0) && \
-     ((__mME)->nas_eps.ue.ksi != OGS_NAS_KSI_NO_KEY_IS_AVAILABLE))
+     ((__mME)->nas_eps.mme.ksi != OGS_NAS_KSI_NO_KEY_IS_AVAILABLE))
 #define CLEAR_SECURITY_CONTEXT(__mME) \
     do { \
         ogs_assert((__mME)); \
@@ -1052,6 +1058,7 @@ typedef struct mme_sess_s {
     /* Related Context */
     ogs_pool_id_t   mme_ue_id;
 
+    /* Owned PDN configuration, independent of the UE subscription list. */
     ogs_session_t   *session;
 
     /* PDN Address Allocation (PAA) */
@@ -1387,6 +1394,7 @@ void sgw_ue_source_deassociate_target(sgw_ue_t *sgw_ue);
 mme_sess_t *mme_sess_add(mme_ue_t *mme_ue, uint8_t pti);
 void mme_sess_remove(mme_sess_t *sess);
 void mme_sess_remove_all(mme_ue_t *mme_ue);
+void mme_sess_set_session(mme_sess_t *sess, const ogs_session_t *session);
 mme_sess_t *mme_sess_find_by_pti(const mme_ue_t *mme_ue, uint8_t pti);
 mme_sess_t *mme_sess_find_by_ebi(const mme_ue_t *mme_ue, uint8_t ebi);
 mme_sess_t *mme_sess_find_by_apn(const mme_ue_t *mme_ue, const char *apn);

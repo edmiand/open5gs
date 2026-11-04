@@ -207,14 +207,6 @@ bool udm_nudm_ueau_handle_result_confirmation_inform(
         return false;
     }
 
-    if (!AuthEvent->success) {
-        ogs_error("[%s] No success", udm_ue->suci);
-        ogs_assert(true ==
-            ogs_sbi_server_send_error(stream, OGS_SBI_HTTP_STATUS_BAD_REQUEST,
-                message, "No success", udm_ue->suci, NULL));
-        return false;
-    }
-
     if (!AuthEvent->time_stamp) {
         ogs_error("[%s] No timeStamp", udm_ue->suci);
         ogs_assert(true ==
@@ -236,6 +228,30 @@ bool udm_nudm_ueau_handle_result_confirmation_inform(
         ogs_assert(true ==
             ogs_sbi_server_send_error(stream, OGS_SBI_HTTP_STATUS_BAD_REQUEST,
                 message, "No servingNetworkName", udm_ue->suci, NULL));
+        return false;
+    }
+
+    if (!strcmp(message->h.method, OGS_SBI_HTTP_METHOD_POST)) {
+        if (message->h.resource.component[2] ||
+            AuthEvent->auth_removal_ind) {
+            ogs_error("[%s] Invalid authentication confirmation", udm_ue->suci);
+            ogs_assert(true == ogs_sbi_server_send_error(stream,
+                OGS_SBI_HTTP_STATUS_BAD_REQUEST, message,
+                "Invalid authentication confirmation", udm_ue->suci, NULL));
+            return false;
+        }
+    } else if (!strcmp(message->h.method, OGS_SBI_HTTP_METHOD_PUT)) {
+        if (!AuthEvent->auth_removal_ind || AuthEvent->success) {
+            ogs_error("[%s] Invalid authentication removal", udm_ue->suci);
+            ogs_assert(true == ogs_sbi_server_send_error(stream,
+                OGS_SBI_HTTP_STATUS_BAD_REQUEST, message,
+                "Invalid authentication removal", udm_ue->suci, NULL));
+            return false;
+        }
+    } else {
+        ogs_assert(true == ogs_sbi_server_send_error(stream,
+            OGS_SBI_HTTP_STATUS_METHOD_NOT_ALLOWED, message,
+            "Invalid HTTP method", message->h.method, NULL));
         return false;
     }
 
@@ -337,13 +353,19 @@ bool udm_nudm_uecm_handle_amf_registration(
         return false;
     }
 
+    if (!ogs_sbi_parse_guami(&udm_ue->guami, Guami)) {
+        ogs_error("[%s] Invalid GUAMI", udm_ue->supi);
+        ogs_assert(true ==
+            ogs_sbi_server_send_error(stream, OGS_SBI_HTTP_STATUS_BAD_REQUEST,
+                message, "Invalid GUAMI", udm_ue->supi, NULL));
+        return false;
+    }
+
     if (udm_ue->dereg_callback_uri)
         ogs_free(udm_ue->dereg_callback_uri);
     udm_ue->dereg_callback_uri = ogs_strdup(
             Amf3GppAccessRegistration->dereg_callback_uri);
     ogs_assert(udm_ue->dereg_callback_uri);
-
-    ogs_sbi_parse_guami(&udm_ue->guami, Guami);
 
     udm_ue->rat_type = Amf3GppAccessRegistration->rat_type;
 
@@ -441,7 +463,13 @@ bool udm_nudm_uecm_handle_amf_registration_update(
      * GUAMI. If so, the UDM shall set the PurgeFlag. The UDM responds with
      * "204 No Content".
      * 2b. Otherwise the UDM responds with "403 Forbidden". */
-    ogs_sbi_parse_guami(&recv_guami, Guami);
+    if (!ogs_sbi_parse_guami(&recv_guami, Guami)) {
+        ogs_error("[%s] Invalid GUAMI", udm_ue->supi);
+        ogs_assert(true ==
+            ogs_sbi_server_send_error(stream, OGS_SBI_HTTP_STATUS_BAD_REQUEST,
+                message, "Invalid GUAMI", udm_ue->supi, NULL));
+        return false;
+    }
     if (memcmp(&recv_guami, &udm_ue->guami, sizeof(recv_guami)) != 0) {
         ogs_error("[%s] Guami mismatch", udm_ue->supi);
         /*
@@ -566,11 +594,12 @@ bool udm_nudm_uecm_handle_smf_registration(
         return false;
     }
 
-    if (!SmfRegistration->pdu_session_id) {
-        ogs_error("[%s:%d] No pduSessionId", udm_ue->supi, sess->psi);
+    if (SmfRegistration->pdu_session_id != sess->psi) {
+        ogs_error("[%s:%d] pduSessionId mismatch [%d]",
+                udm_ue->supi, sess->psi, SmfRegistration->pdu_session_id);
         ogs_assert(true ==
             ogs_sbi_server_send_error(stream, OGS_SBI_HTTP_STATUS_BAD_REQUEST,
-                message, "No pduSessionId", udm_ue->supi, NULL));
+                message, "pduSessionId mismatch", udm_ue->supi, NULL));
         return false;
     }
 
