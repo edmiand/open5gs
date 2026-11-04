@@ -91,6 +91,7 @@ apt-cache show libidn-dev &>/dev/null \
 cd ~
 git clone https://github.com/edmiand/open5gs
 cd open5gs
+git remote add upstream https://github.com/open5gs/open5gs.git   # required by open5gs-upgrade.sh
 meson build --prefix=$(pwd)/install
 ninja -C build
 ./build/tests/registration/registration   # 5GC smoke test
@@ -141,6 +142,7 @@ with `PORT=9999 HOSTNAME=0.0.0.0`. Enable but **do not start** yet.
 ### Step 8 — Helper scripts
 
 - `~/open5gs/open5gs-ctl.sh {start|stop|restart|status|clear-logs} [nf ...]` — manages NFs in order: NRF → SCP → AMF → SMF → UPF → AUSF → UDM → PCF → NSSF → BSF → UDR, plus the WebUI. Each NF logs to `install/var/log/open5gs/<nf>.log`. `clear-logs` truncates all NF log files in-place.
+- `~/open5gs/open5gs-upgrade.sh [--dry-run|--yes|--rollback]` — merges `upstream/main` into this checkout, rebuilds, reports config drift, restarts NFs, and health-checks them, rolling back automatically if any NF comes up unhealthy. Needs the `upstream` remote from Step 4. Run logs are written to `install/var/log/open5gs-upgrade/`.
 
 ### Step 9 — Smoke test
 
