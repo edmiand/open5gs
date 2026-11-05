@@ -143,6 +143,15 @@ with `PORT=9999 HOSTNAME=0.0.0.0`. Enable but **do not start** yet.
 
 - `~/open5gs/open5gs-ctl.sh {start|stop|restart|status|clear-logs} [nf ...]` — manages NFs in order: NRF → SCP → AMF → SMF → UPF → AUSF → UDM → PCF → NSSF → BSF → UDR, plus the WebUI. Each NF logs to `install/var/log/open5gs/<nf>.log`. `clear-logs` truncates all NF log files in-place.
 - `~/open5gs/open5gs-upgrade.sh [--dry-run|--yes|--rollback]` — merges `upstream/main` into this checkout, rebuilds, reports config drift, restarts NFs, and health-checks them, rolling back automatically if any NF comes up unhealthy. Needs the `upstream` remote from Step 4. Run logs are written to `install/var/log/open5gs-upgrade/`.
+- `~/open5gs/kuma-push.sh` — reports 5GC health to an [Uptime Kuma](https://github.com/louislam/uptime-kuma) **Push** monitor. It sends `down` with a reason unless all of these pass: NRF, SCP, AMF, SMF, AUSF, UDM, PCF, NSSF, BSF and UDR are `REGISTERED` in NRF; AMF NGAP is listening on SCTP 38412; and the UPF metrics endpoint answers. A push model is used because the SBI ports are loopback-only and speak h2c, which Kuma's HTTP monitor can't, and Kuma has no SCTP monitor. Setup:
+  1. In Kuma, create a Push monitor with a heartbeat interval of about 60 s and copy its push URL.
+  2. Requires `jq` (`sudo apt install jq`). If Kuma uses a self-signed cert, save it (e.g. `/etc/ssl/certs/uptime-kuma.crt`); the script passes it via `--cacert` and never uses `-k`.
+  3. Create `~/.config/open5gs-kuma.env` (mode 600; keeps the token out of git):
+     ```
+     KUMA_PUSH_URL="https://<kuma-host>/api/push/<TOKEN>"
+     KUMA_CACERT="/etc/ssl/certs/uptime-kuma.crt"
+     ```
+  4. Run it once (`~/open5gs/kuma-push.sh` prints `UP (...)` on success), then add a cron entry: `* * * * * $HOME/open5gs/kuma-push.sh >/dev/null 2>&1`
 
 ### Step 9 — Smoke test
 
