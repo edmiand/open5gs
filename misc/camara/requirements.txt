@@ -1,0 +1,11 @@
+# Runtime (Python 3.12 via uv; see setup.sh)
+fastapi==0.165.0
+starlette==1.10.0
+pydantic==2.14.4
+uvicorn==0.48.0
+httpx[http2]==0.28.1
+h2==4.4.1
+pymongo==4.17.0
+PyJWT==2.13.0
+PyYAML==6.0.3
+python-multipart==0.0.30

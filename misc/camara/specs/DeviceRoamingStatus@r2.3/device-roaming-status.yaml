@@ -1,0 +1,699 @@
+openapi: 3.0.3
+info:
+  title: Device Roaming Status
+  description: |
+    This API provides the API consumer with the ability to query device roaming Status
+
+    # Introduction
+
+    ## Roaming Status
+    API consumer is able to verify whether a certain user device is in roaming situation (or not).
+
+    The verification of the roaming situation depends on the network's ability. Additionally to the roaming status, when the device is in roaming situation, visited country information could be returned in the response.
+
+    ## Possible Use-Cases
+    Roaming status verification could be useful in scenario such as (not exhaustive):
+      - For regulatory reasons, where a customer may need to be within a certain jurisdiction, or out with others, in order for transactions to be authorized
+      - For security / fraud reasons, to establish that a customer is located where they claim to be
+      - For service delivery reasons, to ensure that the customer has access to particular service, and will not incur roaming charges in accessing them
+
+    ## Relevant terms and definitions
+
+    * **Roaming**:\
+      For the purposes of this API, a device is considered to be roaming if it is connected to a mobile network with a different mobile country code (MCC) to its home network. A device is not considered to be roaming if it is connected to a mobile network that has the same MCC as the home network, even if that network is not the home network. Where a country has been allocated more than one MCC, a device is not considered to be roaming if it is connected to any network that uses a MCC allocated for that country, even if that MCC is different to that of the home network.
+
+    * **Device**:\
+      A device refers to any physical hardware that can connect to a mobile network and participate in network communication.
+
+      At least one identifier for the device (user equipment) out of four options must be provided: IPv4 address, IPv6 address, phone number, or network access identifier assigned by the mobile network operator for the device. Where more than one device identifier is provided, only one identifier will be selected by the implementation and this choice indicated to the API consumer in the response together with the roaming status.
+
+      Note: Network Access Identifier is defined for future use and will not be supported with this version of the API.
+
+    * **Country**:\
+      The mobile country code and associated ISO country name. The visited country information is provided when the device is roaming. When the device is not roaming, the country will be that of the home network for the device, but this information is not provided by the API.
+
+    * **Last Status Time**:\
+      The time when the roaming status was last confirmed to be correct by the API provider. An older status is more likely to now be incorrect. The API provider may be unable to confirm a more recent status because, for example, the device may no longer be connected to the mobile network.
+
+    # API Functionality
+
+    The API exposes following capabilities:
+
+    ## Device Roaming Status
+
+    The endpoint `POST /retrieve` allows the API consumer to synchronously get the roaming status and country information (when roaming) for a specific device
+
+    An example of a JSON response object is as follows:
+    ```
+    {
+      "lastStatusTime": "2024-02-20T10:41:38.657Z",
+      "roaming": true,
+      "countryCode": 262,
+      "countryName": [
+        "DE"
+      ]
+    }
+    ```
+
+    ## Error Handling
+    Errors may be returned for the following reasons. Note that this list is not exhaustive.
+
+    `401 UNAUTHENTICATED`:
+    - The access token is not a valid access token for the API provider
+    - The access token was valid but has now expired
+
+    `400 INVALID_ARGUMENT`:
+    - The API request is not compliant with this OAS definition
+
+    `404 IDENTIFIER_NOT_FOUND`:
+    - The device identified by the `device` object in the request is not managed by the API provider
+
+    `403 PERMISSION_DENIED`:
+    - The access token does not have the required scope for the endpoint being called
+    - The end user has not consented to the API consumer getting access to the device identifier information (2-legged access token only)
+
+    `422 SERVICE_NOT_APPLICABLE`:
+    - The roaming status is not applicable to the identified device. For example, the phone number might identify a landline.
+
+    `422 UNSUPPORTED_IDENTIFIER`:
+    - A parameter provided in the `device` object is not supported by this implementation (e.g. `networkAccessIdentifier`)
+
+    `422 MISSING_IDENTIFIER`:\
+    `422 UNNECESSARY_IDENTIFIER`:
+    - See the section "Identifying the device from the access token" below
+
+    `429 QUOTA_EXCEEDED`:
+    - The API consumer has used up the quota of API requests that they were allocated for this API
+
+    `429 TOO_MANY_REQUESTS`:
+    - The rate at which the API consumer is sending requests has exceeded that allowed by the API provider. Try again later.
+
+    `503 UNAVAILABLE`:
+    - The API provider is unable to provide the roaming status for the requested device at this time. Try again later.
+
+    <!-- CAMARA:MANDATORY:authorization-and-authentication:BEGIN -->
+
+    # Authorization and authentication
+
+    The "Camara Security and Interoperability Profile" provides details of how an API consumer requests an access token. Please refer to Identity and Consent Management (https://github.com/camaraproject/IdentityAndConsentManagement/) for the released version of the profile.
+
+    The specific authorization flows to be used will be agreed upon during the onboarding process, happening between the API consumer and the API provider, taking into account the declared purpose for accessing the API, whilst also being subject to the prevailing legal framework dictated by local legislation.
+
+    In cases where personal data is processed by the API and users can exercise their rights through mechanisms such as opt-in and/or opt-out, the use of three-legged access tokens is mandatory. This ensures that the API remains in compliance with privacy regulations, upholding the principles of transparency and user-centric privacy-by-design.
+    <!-- CAMARA:MANDATORY:authorization-and-authentication:END -->
+
+    <!-- CAMARA:MANDATORY:identifying-device-from-access-token:BEGIN -->
+
+    # Identifying the device from the access token
+
+    This API requires the API consumer to identify a device as the subject of the API as follows:
+    - When the API is invoked using a two-legged access token, the subject will be identified from the optional `device` object, which therefore MUST be provided.
+    - When a three-legged access token is used however, this optional identifier MUST NOT be provided, as the subject will be uniquely identified from the access token.
+
+    This approach simplifies API usage for API consumers using a three-legged access token to invoke the API by relying on the information that is associated with the access token and was identified during the authentication process.
+
+    ## Error handling:
+
+    - If the subject cannot be identified from the access token and the optional `device` object is not included in the request, then the server will return an error with the `422 MISSING_IDENTIFIER` error code.
+
+    - If the subject can be identified from the access token and the optional `device` object is also included in the request, then the server will return an error with the `422 UNNECESSARY_IDENTIFIER` error code. This will be the case even if the same device is identified by these two methods, as the server is unable to make this comparison.
+    <!-- CAMARA:MANDATORY:identifying-device-from-access-token:END -->
+
+    # Multi-SIM scenario handling
+
+    In multi-SIM scenarios where more than one mobile device is associated with a phone number (e.g. a smartphone with an associated smartwatch), it might not be possible to uniquely identify the device for which the roaming status should be returned from that phone number. If the phone number is used as the device identifier when querying in a multi-SIM scenario, the API may:
+    - respond with an error, or
+    - return a combined roaming status for the multi-SIM group as a whole, or
+    - return the roaming status for a single device in the multi-SIM group, which may not be the intended device.
+
+    Possible solutions in such a scenario include:
+    - Using the authorisation code flow to obtain an access token, which will automatically identify the intended device
+    - Identifying the intended device from a unique identifier for that device, such as its source IP address and port
+    - Check with the SIM provider whether a unique "secondary" phone number is already associated with each device, and use the secondary phone number to identify the intended device if available.
+
+    <!-- CAMARA:MANDATORY:additional-error-responses:BEGIN -->
+
+    # Additional CAMARA error responses
+
+    The list of error codes in this API specification is not exhaustive. Therefore the API specification MAY not document some non-mandatory error statuses as indicated in `CAMARA API Design Guide`.
+
+    Please refer to the `CAMARA_common.yaml` of the Commonalities Release associated to this API version for a complete list of error responses. The applicable Commonalities Release can be identified from the `x-camara-commonalities` field, the changelog and the metadata of the released API version.
+
+    As a specific rule, error `501 - NOT_IMPLEMENTED` can be only a possible error response if it is explicitly documented in the API.
+    <!-- CAMARA:MANDATORY:additional-error-responses:END -->
+
+    <!-- CAMARA:MANDATORY:request-body-strictness:BEGIN -->
+
+    # Request body strictness
+
+    This API rejects requests with JSON request bodies that contain properties not declared in this specification, at any nesting level. Unknown properties result in a `400 INVALID_ARGUMENT` response.
+    <!-- CAMARA:MANDATORY:request-body-strictness:END -->
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+  version: 1.2.0
+  x-camara-commonalities: 0.9.0
+servers:
+  - url: '{apiRoot}/device-roaming-status/v1'
+    variables:
+      apiRoot:
+        default: http://localhost:9091
+        description: API root, defined by the service provider, e.g. `api.example.com` or `api.example.com/somepath`
+tags:
+  - name: Roaming Status Retrieval
+    description: Operation to get device roaming status and country information (if roaming) synchronously
+externalDocs:
+  description: Product documentation at CAMARA
+  url: https://github.com/camaraproject/DeviceRoamingStatus
+paths:
+  /retrieve:
+    post:
+      tags:
+        - Roaming Status Retrieval
+      summary: Get the current roaming status and the country information
+      description: Get the current roaming status and the country information
+      operationId: getRoamingStatus
+      parameters:
+        - $ref: '#/components/parameters/x-correlator'
+      security:
+        - openId:
+            - device-roaming-status:read
+      requestBody:
+        description: Request body definition for the getRoamingStatus operation
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoamingStatusRequest'
+            examples:
+              Identify Device By 3-Legged Access Token:
+                $ref: '#/components/examples/IdentifyDeviceBy3LeggedToken'
+              Identify Device By Phone Number:
+                $ref: '#/components/examples/IdentifyDeviceByPhoneNumber'
+              Identify Device By IP Address:
+                $ref: '#/components/examples/IdentifyDeviceByIPAddress'
+              Identify Device By Multiple Identifiers:
+                $ref: '#/components/examples/IdentifyDeviceByMultipleIdentifiers'
+      responses:
+        '200':
+          description: Contains information about current roaming status
+          headers:
+            x-correlator:
+              $ref: '#/components/headers/x-correlator'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoamingStatusResponse'
+              examples:
+                Not Roaming:
+                  value:
+                    lastStatusTime: '2024-02-20T10:41:38.657Z'
+                    roaming: false
+                No Country Name:
+                  value:
+                    lastStatusTime: '2024-02-20T10:41:38.657Z'
+                    roaming: true
+                    countryCode: 901
+                    countryName: []
+                Single Country Code:
+                  value:
+                    lastStatusTime: '2024-02-20T10:41:38.657Z'
+                    roaming: true
+                    countryCode: 262
+                    countryName:
+                      - DE
+                Single Country Code With Device Disambiguation:
+                  value:
+                    device:
+                      phoneNumber: '+123456789'
+                    lastStatusTime: '2024-02-20T10:41:38.657Z'
+                    roaming: true
+                    countryCode: 262
+                    countryName:
+                      - DE
+                Multiple Country Names:
+                  value:
+                    lastStatusTime: '2024-02-20T10:41:38.657Z'
+                    roaming: true
+                    countryCode: 340
+                    countryName:
+                      - BL
+                      - GF
+                      - GP
+                      - MF
+                      - MQ
+        '400':
+          $ref: '#/components/responses/BadRequest400'
+        '401':
+          $ref: '#/components/responses/Unauthenticated401'
+        '403':
+          $ref: '#/components/responses/PermissionDenied403'
+        '404':
+          $ref: '#/components/responses/IdentifierNotFound404'
+        '422':
+          $ref: '#/components/responses/DeviceIdentifier422'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsOrQuotaExceeded429'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable503'
+components:
+  securitySchemes:
+    openId:
+      type: openIdConnect
+      openIdConnectUrl: https://example.com/.well-known/openid-configuration
+      description: OpenID Connect authentication via discovery metadata.
+  responses:
+    TooManyRequestsOrQuotaExceeded429:
+      description: Too Many Requests or Quota Exceeded
+      headers:
+        x-correlator:
+          $ref: '#/components/headers/x-correlator'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorInfo'
+              - type: object
+                properties:
+                  status:
+                    enum:
+                      - 429
+                  code:
+                    enum:
+                      - TOO_MANY_REQUESTS
+                      - QUOTA_EXCEEDED
+          examples:
+            GENERIC_429_TOO_MANY_REQUESTS:
+              $ref: '#/components/examples/GENERIC_429_TOO_MANY_REQUESTS'
+            GENERIC_429_QUOTA_EXCEEDED:
+              $ref: '#/components/examples/GENERIC_429_QUOTA_EXCEEDED'
+    ServiceUnavailable503:
+      description: Service Unavailable
+      headers:
+        x-correlator:
+          $ref: '#/components/headers/x-correlator'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorInfo'
+              - type: object
+                properties:
+                  status:
+                    enum:
+                      - 503
+                  code:
+                    enum:
+                      - UNAVAILABLE
+          examples:
+            GENERIC_503_UNAVAILABLE:
+              $ref: '#/components/examples/GENERIC_503_UNAVAILABLE'
+    BadRequest400:
+      description: Bad Request
+      headers:
+        x-correlator:
+          $ref: '#/components/headers/x-correlator'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorInfo'
+              - type: object
+                properties:
+                  status:
+                    enum:
+                      - 400
+                  code:
+                    enum:
+                      - INVALID_ARGUMENT
+          examples:
+            GENERIC_400_INVALID_ARGUMENT:
+              $ref: '#/components/examples/GENERIC_400_INVALID_ARGUMENT'
+    Unauthenticated401:
+      description: Unauthorized
+      headers:
+        x-correlator:
+          $ref: '#/components/headers/x-correlator'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorInfo'
+              - type: object
+                properties:
+                  status:
+                    enum:
+                      - 401
+                  code:
+                    enum:
+                      - UNAUTHENTICATED
+          examples:
+            GENERIC_401_UNAUTHENTICATED:
+              $ref: '#/components/examples/GENERIC_401_UNAUTHENTICATED'
+    PermissionDenied403:
+      description: Forbidden
+      headers:
+        x-correlator:
+          $ref: '#/components/headers/x-correlator'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorInfo'
+              - type: object
+                properties:
+                  status:
+                    enum:
+                      - 403
+                  code:
+                    enum:
+                      - PERMISSION_DENIED
+          examples:
+            GENERIC_403_PERMISSION_DENIED:
+              $ref: '#/components/examples/GENERIC_403_PERMISSION_DENIED'
+    IdentifierNotFound404:
+      description: Not found
+      headers:
+        x-correlator:
+          $ref: '#/components/headers/x-correlator'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorInfo'
+              - type: object
+                properties:
+                  status:
+                    enum:
+                      - 404
+                  code:
+                    enum:
+                      - IDENTIFIER_NOT_FOUND
+          examples:
+            GENERIC_404_IDENTIFIER_NOT_FOUND:
+              $ref: '#/components/examples/GENERIC_404_IDENTIFIER_NOT_FOUND'
+    DeviceIdentifier422:
+      description: Unprocessable Content
+      headers:
+        x-correlator:
+          $ref: '#/components/headers/x-correlator'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorInfo'
+              - type: object
+                properties:
+                  status:
+                    enum:
+                      - 422
+                  code:
+                    enum:
+                      - SERVICE_NOT_APPLICABLE
+                      - MISSING_IDENTIFIER
+                      - UNSUPPORTED_IDENTIFIER
+                      - UNNECESSARY_IDENTIFIER
+          examples:
+            GENERIC_422_SERVICE_NOT_APPLICABLE:
+              $ref: '#/components/examples/GENERIC_422_SERVICE_NOT_APPLICABLE'
+            GENERIC_422_MISSING_IDENTIFIER_DEVICE:
+              $ref: '#/components/examples/GENERIC_422_MISSING_IDENTIFIER_DEVICE'
+            GENERIC_422_UNSUPPORTED_IDENTIFIER_DEVICE:
+              $ref: '#/components/examples/GENERIC_422_UNSUPPORTED_IDENTIFIER_DEVICE'
+            GENERIC_422_UNNECESSARY_IDENTIFIER_DEVICE:
+              $ref: '#/components/examples/GENERIC_422_UNNECESSARY_IDENTIFIER_DEVICE'
+  schemas:
+    LastStatusTime:
+      description: |
+        The last time that the device roaming status was confirmed to be correct by the API provider. It might not be possible to provide the current status because, for example, the device may not be connected to any mobile network.
+        It must follow [RFC 3339](https://datatracker.ietf.org/doc/html/rfc3339#section-5.6) and must have time zone.
+      allOf:
+        - $ref: '#/components/schemas/DateTime'
+    ActiveRoaming:
+      description: Roaming status. True, if it is roaming
+      type: boolean
+    CountryCode:
+      description: The Mobile country code (MCC) as an geographic region identifier for the country and the dependent areas.
+      type: integer
+      format: int32
+      minimum: 100
+      maximum: 999
+    CountryName:
+      description: The ISO 3166 ALPHA-2 country-codes of mapped to mobile country code(MCC). If there is mapping of one MCC to multiple countries, then we have list of countries. If there is no mapping of MCC to any country, then an empty array [] shall be returned..
+      type: array
+      maxItems: 5
+      items:
+        description: The ISO 3166 ALPHA-2 country-code
+        type: string
+        maxLength: 2
+        pattern: ^[A-Z]{2}$
+    RoamingStatusResponse:
+      description: The response body providing details of the roaming status of the requested device
+      type: object
+      required:
+        - lastStatusTime
+        - roaming
+      properties:
+        device:
+          $ref: '#/components/schemas/DeviceResponse'
+        lastStatusTime:
+          $ref: '#/components/schemas/LastStatusTime'
+        roaming:
+          $ref: '#/components/schemas/ActiveRoaming'
+        countryCode:
+          $ref: '#/components/schemas/CountryCode'
+        countryName:
+          $ref: '#/components/schemas/CountryName'
+    RoamingStatusRequest:
+      description: The request body for retrieving the current roaming status for the requested device.
+      type: object
+      properties:
+        device:
+          $ref: '#/components/schemas/Device'
+    XCorrelator:
+      type: string
+      description: Correlator string, UUID format recommended but any string matching the pattern can be used
+      pattern: ^[a-zA-Z0-9-_:;.\/<>{}]{0,256}$
+      maxLength: 256
+      example: b4333c46-49c0-4f62-80d7-f0ef930f1c46
+    PhoneNumber:
+      description: A public identifier addressing a telephone subscription. In mobile networks it corresponds to the MSISDN (Mobile Station International Subscriber Directory Number). In order to be globally unique it has to be formatted in international format, according to E.164 standard, prefixed with '+'.
+      type: string
+      pattern: ^\+[1-9][0-9]{4,14}$
+      maxLength: 16
+      example: '+123456789'
+    NetworkAccessIdentifier:
+      description: A public identifier addressing a subscription in a mobile network. In 3GPP terminology, it corresponds to the GPSI formatted with the External Identifier ({Local Identifier}@{Domain Identifier}). Unlike the telephone number, the network access identifier is not subjected to portability ruling in force, and is individually managed by each operator.
+      type: string
+      maxLength: 2048
+      example: 123456789@example.com
+    SingleIpv4Address:
+      description: A single IPv4 address with no subnet mask
+      type: string
+      format: ipv4
+      maxLength: 15
+      example: 84.125.93.10
+    Port:
+      description: TCP or UDP port number
+      type: integer
+      format: int32
+      minimum: 1
+      maximum: 65535
+    DeviceIpv4Address:
+      type: object
+      description: |
+        The device should be identified by either the public (observed) IP address and port as seen by the application server, or the private (local) and any public (observed) IP addresses in use by the device (this information can be obtained by various means, for example from some DNS servers).
+
+        If the allocated and observed IP addresses are the same (i.e. NAT is not in use) then  the same address should be specified for both publicAddress and privateAddress.
+
+        If NAT64 is in use, the device should be identified by its publicAddress and publicPort, or separately by its allocated IPv6 address (field ipv6Address of the Device object)
+
+        In all cases, publicAddress must be specified, along with at least one of either privateAddress or publicPort, dependent upon which is known. In general, mobile devices cannot be identified by their public IPv4 address alone.
+      properties:
+        publicAddress:
+          $ref: '#/components/schemas/SingleIpv4Address'
+        privateAddress:
+          $ref: '#/components/schemas/SingleIpv4Address'
+        publicPort:
+          $ref: '#/components/schemas/Port'
+      anyOf:
+        - required:
+            - publicAddress
+            - privateAddress
+        - required:
+            - publicAddress
+            - publicPort
+      example:
+        publicAddress: 84.125.93.10
+        publicPort: 59765
+    SingleIpv6Address:
+      description: A single IPv6 address with no subnet mask
+      type: string
+      format: ipv6
+      maxLength: 45
+      example: 2001:db8:85a3:8d3:1319:8a2e:370:7344
+    DeviceIpv6Address:
+      description: |
+        The device should be identified by the observed IPv6 address, or by any single IPv6 address from within the subnet allocated to the device (e.g. adding ::0 to the /64 prefix).
+      allOf:
+        - $ref: '#/components/schemas/SingleIpv6Address'
+    Device:
+      description: |
+        End-user equipment able to connect to a mobile network. Examples of devices include smartphones or IoT sensors/actuators.
+            The developer can choose to provide the below specified device identifiers:
+            * `ipv4Address`
+            * `ipv6Address`
+            * `phoneNumber`
+            * `networkAccessIdentifier`
+            NOTE1: the network operator might support only a subset of these options. The API Consumer can provide multiple identifiers to ensure compatibility across different network operators. In this case, the API Provider will use one of the identifiers for the API logic without performing any matching checks among the provided identifiers.
+            NOTE2: as for this Commonalities release, we are enforcing that the networkAccessIdentifier is only part of the schema for future-proofing, and CAMARA does not currently allow its use. After the CAMARA meta-release work is concluded and the relevant issues are resolved, its use will need to be explicitly documented in the guidelines.
+      type: object
+      properties:
+        phoneNumber:
+          $ref: '#/components/schemas/PhoneNumber'
+        networkAccessIdentifier:
+          $ref: '#/components/schemas/NetworkAccessIdentifier'
+        ipv4Address:
+          $ref: '#/components/schemas/DeviceIpv4Address'
+        ipv6Address:
+          $ref: '#/components/schemas/DeviceIpv6Address'
+      minProperties: 1
+    DeviceResponse:
+      description: |
+        An identifier for the end-user equipment able to connect to the network that the response refers to. This parameter is only returned when the API consumer includes the `device` parameter in their request (i.e. they are using a two-legged access token), and is relevant when more than one device identifier is specified, as only one of those device identifiers is allowed in the response.
+
+        If the API consumer provides more than one device identifier in their request, and this schema is included in the response definition, the API provider MUST use it to return a single identifier which is the one they are using to fulfil the request, even if the identifiers do not match the same device. API provider does not perform any logic to validate/correlate that the indicated device identifiers match the same device. No error should be returned if the identifiers are otherwise valid to prevent API consumers correlating different identifiers with a given end user.
+      allOf:
+        - $ref: '#/components/schemas/Device'
+        - maxProperties: 1
+    DateTime:
+      type: string
+      format: date-time
+      maxLength: 64
+      description: Timestamp. It must follow [RFC 3339](https://datatracker.ietf.org/doc/html/rfc3339#section-5.6) and must have time zone.
+      example: '2018-04-05T17:31:00Z'
+    ErrorInfo:
+      type: object
+      description: A structured error response providing details about a failed request, including the HTTP status code, an error code, and a human-readable message
+      required:
+        - status
+        - code
+        - message
+      properties:
+        status:
+          type: integer
+          format: int32
+          minimum: 100
+          maximum: 599
+          description: HTTP response status code
+        code:
+          type: string
+          maxLength: 96
+          description: A human-readable code to describe the error
+        message:
+          type: string
+          maxLength: 512
+          description: A human-readable description of what the event represents
+  examples:
+    IdentifyDeviceBy3LeggedToken:
+      description: Empty JSON when device is identified by access token
+      value: {}
+    IdentifyDeviceByPhoneNumber:
+      description: Identifying device by phone number
+      value:
+        device:
+          phoneNumber: '+123456789'
+    IdentifyDeviceByIPAddress:
+      description: Identifying device by IP address
+      value:
+        device:
+          ipv4Address:
+            publicAddress: 84.125.93.10
+            publicPort: 59765
+    IdentifyDeviceByMultipleIdentifiers:
+      description: Identifying device by multiple device identifiers
+      value:
+        device:
+          phoneNumber: '+123456789'
+          ipv4Address:
+            publicAddress: 84.125.93.10
+            publicPort: 59765
+          networkAccessIdentifier: 123456789@example.com
+    GENERIC_400_INVALID_ARGUMENT:
+      description: Invalid Argument. Generic Syntax Exception
+      value:
+        status: 400
+        code: INVALID_ARGUMENT
+        message: Client specified an invalid argument, request body or query param.
+    GENERIC_401_UNAUTHENTICATED:
+      description: Request cannot be authenticated and a new authentication is required
+      value:
+        status: 401
+        code: UNAUTHENTICATED
+        message: Request not authenticated due to missing, invalid, or expired credentials. A new authentication is required.
+    GENERIC_403_PERMISSION_DENIED:
+      description: Permission denied. OAuth2 token access does not have the required scope or when the user fails operational security
+      value:
+        status: 403
+        code: PERMISSION_DENIED
+        message: Client does not have sufficient permissions to perform this action.
+    GENERIC_404_IDENTIFIER_NOT_FOUND:
+      description: The identifier cannot be matched to a device or phone number
+      value:
+        status: 404
+        code: IDENTIFIER_NOT_FOUND
+        message: The identifier is not found.
+    GENERIC_422_SERVICE_NOT_APPLICABLE:
+      description: Service not applicable for the provided identifier
+      value:
+        status: 422
+        code: SERVICE_NOT_APPLICABLE
+        message: The service is not available for the provided identifier.
+    GENERIC_422_MISSING_IDENTIFIER_DEVICE:
+      description: The device identifier is not included in the request and the device cannot be derived from the access token
+      value:
+        status: 422
+        code: MISSING_IDENTIFIER
+        message: The device cannot be identified.
+    GENERIC_422_UNSUPPORTED_IDENTIFIER_DEVICE:
+      description: None of the provided device identifiers is supported by the implementation
+      value:
+        status: 422
+        code: UNSUPPORTED_IDENTIFIER
+        message: The identifier provided is not supported.
+    GENERIC_422_UNNECESSARY_IDENTIFIER_DEVICE:
+      description: An explicit device identifier is provided when the device has already been identified from the access token
+      value:
+        status: 422
+        code: UNNECESSARY_IDENTIFIER
+        message: The device is already identified by the access token.
+    GENERIC_429_TOO_MANY_REQUESTS:
+      description: Access to the API has been temporarily blocked due to rate or spike arrest limits being reached
+      value:
+        status: 429
+        code: TOO_MANY_REQUESTS
+        message: Rate limit reached.
+    GENERIC_429_QUOTA_EXCEEDED:
+      description: Request is rejected due to exceeding a business quota limit
+      value:
+        status: 429
+        code: QUOTA_EXCEEDED
+        message: Out of resource quota.
+    GENERIC_503_UNAVAILABLE:
+      description: Service is not available. Temporary situation usually related to maintenance process in the server side
+      value:
+        status: 503
+        code: UNAVAILABLE
+        message: Service Unavailable.
+  parameters:
+    x-correlator:
+      name: x-correlator
+      in: header
+      description: Correlation id for the different services
+      schema:
+        $ref: '#/components/schemas/XCorrelator'
+  headers:
+    x-correlator:
+      description: Correlation id for the different services
+      schema:
+        $ref: '#/components/schemas/XCorrelator'

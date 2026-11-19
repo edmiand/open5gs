@@ -35,7 +35,7 @@ Release tags were the latest on GitHub as of 2026-11-19. Specs are vendored into
 |----------|--------|-----|
 | Core | Keep Open5GS (this fork) | free5GC has no published CAMARA code. Its NEF lacks AsSessionWithQoS, and there's no SEPP (no roaming). A gateway is needed either way, and migrating would cost an extra 3–5 days and the existing lab tooling. |
 | Integration style | **CAMARA gateway sidecar** acting as AF / "mini-NEF" | No NEF in Open5GS. A sidecar avoids touching C code and upstream merges. |
-| Language / stack | Python 3.10, FastAPI, uvicorn, httpx, pymongo, PyJWT | Matches the sibling `~/open5gs-mcp` project (same deps, same patterns), and it's available on the VM. |
+| Language / stack | Python 3.12 (via `uv`), FastAPI, uvicorn, httpx[http2], pymongo, PyJWT | Matches the sibling `~/open5gs-mcp` project (same `uv` toolchain and deps). The system Python 3.10 lacks `python3-venv`. |
 | Location | `misc/camara/` in this repo | Keeps the demo versioned with the core it targets. |
 | Run model | systemd unit `open5gs-camara.service`, venv under `misc/camara/.venv` | Same as the `open5gs-mcp` / `open5gs-webui` units. |
 | Listen | `0.0.0.0:8090` (HTTP in the lab; TLS optional later) | Must be reachable from the UE data path at `10.45.0.1` (Number Verification) and from the LAN. |
@@ -85,6 +85,11 @@ Release tags were the latest on GitHub as of 2026-11-19. Specs are vendored into
 The core's internal SBI is **h2c only** (HTTP/2 without TLS; see `kuma-push.sh`). The SMF/AMF/UPF `:9090` endpoints
 are plain HTTP/1.1.
 
+**Phase 0 findings (verified live 2026-11-19):**
+- httpx speaks h2c only with `http1=False, http2=True` (prior knowledge). `http2=True` alone fails ("illegal request line").
+- `GET /nudm-uecm/v1/{supi}/registrations/amf-3gpp-access` works and also returns `pei`.
+- NRF *discovery* (`nnrf-disc`) with requester AF/NEF/PCF returns **no UDM** (filtered by UDM's `allowedNfTypes`). Use `nnrf-nfm` listings + fixed addresses instead; don't rely on discovery as an AF.
+
 ## 4. Per-API design summary
 
 Detailed call flows: see §11 (taken from the design discussion).
@@ -115,7 +120,7 @@ misc/camara/
 ├── PLAN.md                     # this document
 ├── README.md                   # install / run / demo walkthrough (Phase 0)
 ├── requirements.txt
-├── open5gs-camara.service      # systemd unit (installed by setup script)
+├── open5gs-camara.service.in   # systemd unit template (installed by setup.sh --install-service)
 ├── setup.sh                    # venv, deps, unit install, pcf.yaml qos_profiles check
 ├── config.example.yaml         # endpoints, poll intervals, home PLMN, clients
 ├── specs/<Repo>@<tag>/*.yaml   # vendored CAMARA OpenAPI + test_definitions/*.feature
@@ -144,14 +149,14 @@ misc/camara/
 
 Estimates are engineer-days. Each phase ends with a working demo script in `demo/` and a README section.
 
-### Phase 0 — Foundations (2–3 d)
+### Phase 0 — Foundations (2–3 d) — ✅ implemented 2026-11-19 (live resolver check pending a registered UE with MSISDN)
 - Scaffold `misc/camara/`: FastAPI app, config, systemd unit, `setup.sh`, `open5gs-ctl.sh` hook (optional `camara` target).
-- **Spike: h2c from Python.** Confirm httpx with `http1=False, http2=True` does prior-knowledge h2c against the BSF/PCF. Fallbacks: the `h2` library directly, or `pycurl` with `CURL_HTTP_VERSION_2_PRIOR_KNOWLEDGE`.
+- **Spike: h2c from Python.** ✅ httpx with `http1=False, http2=True` works against NRF/BSF/UDM; no fallback needed.
 - Southbound adapters + resolver (phone → SUPI via Mongo; SUPI → IP via SMF `pdu-info`; IP → SUPI via BSF).
 - CAMARA common pieces: `x-correlator`, `ErrorInfo` codes (`INVALID_ARGUMENT`, `IDENTIFIER_NOT_FOUND`, `SERVICE_NOT_APPLICABLE`, …), phone-number E.164 validation, `device` object handling.
 - Auth v1: `POST /oauth2/token` (client_credentials), JWT verify middleware, per-API scopes.
 - Vendor the specs; validate responses against the OpenAPI schemas in tests.
-- Kuma: extend `kuma-push.sh` (or add a check) for gateway `/health`.
+- Kuma: gateway `/health` check — deferred to Phase 6 (keep core health and demo health separate).
 
 **Done when:** `GET /health` shows every southbound reachable, and `resolver` maps the demo UE's phone → SUPI → IP.
 
@@ -236,7 +241,7 @@ These follow the lab rules in `CLAUDE.md`: non-interactive, `sudo` only where re
 | No NWDAF | Connectivity Insights isn't 3GPP analytics | Active probing + UPF metrics; state it in the demo. |
 | No swap history in the core | SIM/Device swap dates exist only once the poller starts | Seed the baseline at install; history starts then. A small optional C patch could log `imeisv` changes with timestamps (not planned). |
 | PCF needs a PCC rule per 5QI per subscriber | QoD returns 403 otherwise | Script the PCC rules; the gateway maps 403 to a CAMARA error with a hint. |
-| h2c client support in Python | Blocks BSF/PCF/UDM calls | Phase 0 spike with fallbacks (h2 / pycurl). |
+| ~~h2c client support in Python~~ | — | Resolved in Phase 0: httpx `http1=False, http2=True`. |
 | BSF binding appears only after a PDU session with PCF | IP lookups fail for idle/unattached UEs | The resolver also checks SMF `pdu-info`; return `SERVICE_NOT_APPLICABLE` / `UNNECESSARY_IDENTIFIER` per spec. |
 | `/pdu-info` / `/ue-info` are Open5GS-specific, not 3GPP | Upstream may change them | Isolate in `core/info.py`; cover with a live smoke test after each `open5gs-upgrade.sh`. |
 | Upstream merges touching `pcf.yaml` | Config conflicts | Keep the `qos_profiles` block small; note it in the README upgrade section. |

@@ -1,0 +1,17 @@
+# Template — installed by `setup.sh --install-service` (@USER@/@DIR@ substituted).
+[Unit]
+Description=Open5GS CAMARA API gateway (lab demo)
+After=network-online.target mongod.service open5gs-netconf.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@DIR@
+Environment=CAMARA_CONFIG=@DIR@/config.yaml
+ExecStart=@DIR@/.venv/bin/python -m camara_gw
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

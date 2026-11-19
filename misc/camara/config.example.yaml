@@ -1,0 +1,41 @@
+# open5gs-camara gateway configuration.
+# setup.sh copies this to config.yaml (git-ignored) and fills in random secrets.
+
+listen:
+  host: 0.0.0.0        # must be reachable from the UE data path (10.45.0.1) for Number Verification
+  port: 8090
+
+# Home PLMN of the lab subscribers (MCC+MNC, no separator)
+home_plmn: "99970"
+
+mongo:
+  uri: mongodb://localhost:27017
+  db: open5gs
+
+# 5GC SBI endpoints (h2c, prior knowledge). Addresses match install/etc/open5gs/*.yaml.
+sbi:
+  nrf: http://127.0.0.10:7777
+  bsf: http://127.0.0.15:7777
+  pcf: http://127.0.0.13:7777
+  udm: http://127.0.0.12:7777
+  timeout: 3.0
+
+# Open5GS metrics-port JSON/Prometheus endpoints (plain HTTP/1.1)
+info:
+  smf: http://127.0.0.4:9090      # /pdu-info
+  amf: http://127.0.0.5:9090      # /ue-info
+  upf: http://127.0.0.7:9090      # /metrics
+  timeout: 3.0
+
+auth:
+  issuer: open5gs-camara
+  signing_key: CHANGE_ME          # HS256 secret; setup.sh generates one
+  token_ttl: 3600
+  clients:
+    - client_id: demo-app
+      client_secret: CHANGE_ME    # setup.sh generates one
+      scopes:
+        - "lab:read"
+
+# Lab-only helper endpoints under /_lab (resolver checks, overrides). Disable for anything but the lab.
+lab_endpoints: true
