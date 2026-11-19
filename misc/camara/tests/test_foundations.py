@@ -92,15 +92,17 @@ def test_resolve_by_ipv6_prefix(client, auth):
     assert j["supi"] == "imsi-999700000000001"
 
 
-def test_resolve_consistent_multi_identifier(client, auth):
-    r = _resolve(client, auth, {"phoneNumber": "+99970000001", "ipv4Address": {"publicAddress": "10.45.0.2"}})
-    assert r.status_code == 200 and r.json()["matched_by"] == ["ipv4Address", "phoneNumber"]
+def test_resolve_multi_identifier_uses_phone_without_crosscheck(client, auth):
+    # Commonalities: provider uses one identifier and must not cross-check the others
+    r = _resolve(client, auth, {"phoneNumber": "+99970000001", "ipv4Address": {"privateAddress": "10.45.0.3"}})
+    j = r.json()
+    assert r.status_code == 200 and j["matched_by"] == ["phoneNumber"]
+    assert j["supi"] == "imsi-999700000000001" and j["device_response"] == {"phoneNumber": "+99970000001"}
 
 
 @pytest.mark.parametrize("device,status,code", [
     ({"phoneNumber": "+99970000009"}, 404, "IDENTIFIER_NOT_FOUND"),
     ({"ipv4Address": {"privateAddress": "10.45.9.9"}}, 404, "IDENTIFIER_NOT_FOUND"),
-    ({"phoneNumber": "+99970000001", "ipv4Address": {"privateAddress": "10.45.0.3"}}, 422, "IDENTIFIER_MISMATCH"),
     ({"networkAccessIdentifier": "user@example.com"}, 422, "UNSUPPORTED_IDENTIFIER"),
     ({}, 422, "MISSING_IDENTIFIER"),
     ({"phoneNumber": "99970000001"}, 400, "INVALID_ARGUMENT"),           # not E.164

@@ -36,6 +36,23 @@ auth:
       client_secret: CHANGE_ME    # setup.sh generates one
       scopes:
         - "lab:read"
+        - "qos-profiles:read"
+        - "quality-on-demand:sessions:create"
+        - "quality-on-demand:sessions:read"
+        - "quality-on-demand:sessions:update"
+        - "quality-on-demand:sessions:delete"
+        - "quality-on-demand:sessions:retrieve-by-device"
+
+notify:
+  allow_http_sink: true     # lab deviation: CAMARA mandates https sinks
+  timeout: 5.0
+  retries: 3
+
+qod:
+  callback_base: http://127.0.0.1:8090   # PCF -> gateway termination callbacks (h2c)
+  verify_timeout: 10.0                   # wait for the dedicated QoS flow in SMF /pdu-info
+  expiry_interval: 1.0
+  af_app_id: camara-qod
 
 # Lab-only helper endpoints under /_lab (resolver checks, overrides). Disable for anything but the lab.
 lab_endpoints: true

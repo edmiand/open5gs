@@ -50,6 +50,15 @@ class SbiClient:
         r.raise_for_status()
         return r.json()
 
+    # ── PCF (Npcf_PolicyAuthorization) ───────────────────────────────────────
+    async def pcf_app_session_create(self, pcf_base: str, app_session_context: dict) -> httpx.Response:
+        return await self.request("POST", f"{pcf_base}/npcf-policyauthorization/v1/app-sessions",
+                                  json=app_session_context)
+
+    async def pcf_app_session_delete(self, app_session_url: str) -> httpx.Response:
+        """Npcf_PolicyAuthorization_Delete: POST {appSessionId}/delete."""
+        return await self.request("POST", f"{app_session_url}/delete")
+
     # ── UDM ──────────────────────────────────────────────────────────────────
     async def udm_amf_registration(self, supi: str) -> dict | None:
         r = await self.request("GET", f"{self.cfg.udm}/nudm-uecm/v1/{supi}/registrations/amf-3gpp-access")

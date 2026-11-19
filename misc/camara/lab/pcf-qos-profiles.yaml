@@ -1,0 +1,13 @@
+# Copy of the block added under `pcf:` in install/etc/open5gs/pcf.yaml (install/ is git-ignored).
+# Maps CAMARA QoD profile names (qosReference) to 5QI; must agree with camara_gw/profiles.yaml.
+# Restart the PCF after changing it (UEs must then re-establish PDU sessions).
+pcf:
+  qos_profiles:
+    - reference: "QOS_E"
+      qos_index: 3
+    - reference: "QOS_S"
+      qos_index: 4
+    - reference: "QOS_M"
+      qos_index: 4
+    - reference: "QOS_L"
+      qos_index: 4

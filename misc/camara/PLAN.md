@@ -160,13 +160,22 @@ Estimates are engineer-days. Each phase ends with a working demo script in `demo
 
 **Done when:** `GET /health` shows every southbound reachable, and `resolver` maps the demo UE's phone → SUPI → IP.
 
-### Phase 1 — QoS Profiles + Quality on Demand (2–3 d)
+### Phase 1 — QoS Profiles + Quality on Demand (2–3 d) — 🟡 implemented 2026-11-19, live QoS-flow check pending UE re-attach
 - `profiles.yaml`: QOS_E/S/M/L → 5QI + bitrates + duration limits; add matching `qos_profiles` to `install/etc/open5gs/pcf.yaml`.
 - Add per-subscriber PCC rules (one per 5QI used) for demo subscribers. Script it via Mongo, not by hand in the WebUI.
 - QoD sessions: create → BSF → PCF app-session (qosReference, marBw, fDescs from `applicationServer`/ports); expiry timer; extend; delete; `notifUri` callback → CloudEvent `qos-status-changed`.
 - Demo: iperf3 before/after; show the new QFI/5QI in SMF `pdu-info` + SMF/PCF logs.
 
 **Done when:** a QoD session creates a dedicated QoS flow visible in `pdu-info`, and it's removed on expiry/delete.
+
+Phase 1 implementation notes (2026-11-19):
+- Lab profile → 5QI: QOS_E = 3, QOS_S/M/L = 4 (all GBR). `targetMin*Rate` → `mirBw*` (GBR), `max*Rate` → `marBw*` (MBR). The PCF's SMF path forces GBR to the NGAP maximum when only MBR is given, so both are always sent.
+- PCF requires a PCC rule with the same 5QI on the subscriber's session. Flowless templates are seeded by `tools/seed_pcc_rules.py`; the PCF skips flowless rules at PDU session setup.
+- **Restarting the PCF drops its SM policy contexts.** BSF bindings stay, but app-session create returns 404 until the UE re-establishes its PDU session. The gateway maps this to 422 `SERVICE_NOT_APPLICABLE`.
+- The BSF binding carries no `supi`/`gpsi` in Open5GS (only the PCF endpoint). IP → SUPI stays with SMF `/pdu-info`.
+- The PCF terminate callback arrives as h2c → the server switched from uvicorn to Hypercorn.
+- Commonalities: with several device identifiers the provider uses one (phone > IPv4 > IPv6) without cross-checking; `IDENTIFIER_MISMATCH` was removed from the resolver.
+- CAMARA requires https sinks; the lab allows http (`notify.allow_http_sink`).
 
 ### Phase 2 — SIM Swap + Device Swap (+ SIM Swap Subscriptions) (2.5–3 d)
 - Poller (2 s) snapshots `msisdn↔imsi` and `imeisv` per IMSI → `camara_events` with timestamps. Seed the baseline on first run.

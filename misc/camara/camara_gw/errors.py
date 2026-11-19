@@ -48,10 +48,6 @@ def unsupported_identifier(msg: str = "The identifier provided is not supported.
     return CamaraError(422, "UNSUPPORTED_IDENTIFIER", msg)
 
 
-def identifier_mismatch(msg: str = "Provided identifiers are not consistent.") -> CamaraError:
-    return CamaraError(422, "IDENTIFIER_MISMATCH", msg)
-
-
 def service_not_applicable(msg: str = "The service is not available for the provided identifier.") -> CamaraError:
     return CamaraError(422, "SERVICE_NOT_APPLICABLE", msg)
 

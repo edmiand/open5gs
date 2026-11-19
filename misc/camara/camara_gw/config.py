@@ -49,6 +49,22 @@ class Auth(BaseModel):
     clients: list[Client] = Field(default_factory=list)
 
 
+class Notify(BaseModel):
+    # CAMARA requires https sinks; the lab demo sink is plain http on the LAN/loopback.
+    allow_http_sink: bool = False
+    timeout: float = 5.0
+    retries: int = 3
+
+
+class Qod(BaseModel):
+    # Base URL the PCF (via SCP) uses for app-session callbacks (h2c). Must be loopback-reachable.
+    callback_base: str = "http://127.0.0.1:8090"
+    # How long to wait for the dedicated QoS flow to show up in SMF /pdu-info
+    verify_timeout: float = 10.0
+    expiry_interval: float = 1.0
+    af_app_id: str = "camara-qod"
+
+
 class Config(BaseModel):
     listen: Listen = Field(default_factory=Listen)
     home_plmn: str = "99970"
@@ -57,6 +73,8 @@ class Config(BaseModel):
     info: Info = Field(default_factory=Info)
     auth: Auth
     lab_endpoints: bool = False
+    notify: Notify = Field(default_factory=Notify)
+    qod: Qod = Field(default_factory=Qod)
 
 
 def load_config(path: str | os.PathLike | None = None) -> Config:

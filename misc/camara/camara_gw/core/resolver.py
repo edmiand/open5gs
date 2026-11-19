@@ -39,6 +39,7 @@ class ResolvedDevice:
     phone_number: str | None                    # E.164 with '+', first MSISDN if any
     sessions: list[PduSession] = field(default_factory=list)
     matched_by: list[str] = field(default_factory=list)
+    device_response: dict | None = None         # the single identifier used (CAMARA DeviceResponse)
 
     @property
     def imsi(self) -> str:
@@ -93,39 +94,36 @@ class Resolver:
         return e164_from_msisdn(msisdns[0]) if msisdns else None
 
     async def resolve(self, device: Device | None, *, require_session: bool = False) -> ResolvedDevice:
-        """Resolve a CAMARA Device to a single subscriber, enforcing identifier consistency."""
+        """Resolve a CAMARA Device to a single subscriber.
+
+        Per CAMARA Commonalities, when several identifiers are given the provider uses ONE of
+        them (precedence: phoneNumber, ipv4Address, ipv6Address) without cross-checking the
+        others, and echoes only that one back (DeviceResponse).
+        """
         if device is None or device.is_empty():
             raise errors.missing_identifier()
         if device.networkAccessIdentifier and not (device.phoneNumber or device.ipv4Address or device.ipv6Address):
-            raise errors.unsupported_identifier("networkAccessIdentifier is not supported by this lab.")
+            raise errors.unsupported_identifier("networkAccessIdentifier is not supported.")
 
-        candidates: dict[str, str] = {}          # identifier kind -> SUPI
         pdu = None
-
         if device.phoneNumber:
+            used = "phoneNumber"
             supi = await self.supi_for_phone(device.phoneNumber)
-            if supi is None:
-                raise errors.identifier_not_found()
-            candidates["phoneNumber"] = supi
-
-        if device.ipv4Address or device.ipv6Address:
+            echo = {"phoneNumber": device.phoneNumber}
+        elif device.ipv4Address:
+            used = "ipv4Address"
             pdu = await self._pdu_by_supi()
-            if device.ipv4Address:
-                addrs = {a for a in (device.ipv4Address.privateAddress, device.ipv4Address.publicAddress) if a}
-                hit = next((s for s, ss in pdu.items() if any(x.ipv4 in addrs for x in ss)), None)
-                if hit is None:
-                    raise errors.identifier_not_found()
-                candidates["ipv4Address"] = hit
-            if device.ipv6Address:
-                hit = next((s for s, ss in pdu.items()
-                            if any(x.ipv6 and _ipv6_match(device.ipv6Address, x.ipv6) for x in ss)), None)
-                if hit is None:
-                    raise errors.identifier_not_found()
-                candidates["ipv6Address"] = hit
-
-        if len(set(candidates.values())) > 1:
-            raise errors.identifier_mismatch()
-        supi = next(iter(candidates.values()))
+            addrs = {a for a in (device.ipv4Address.privateAddress, device.ipv4Address.publicAddress) if a}
+            supi = next((s for s, ss in pdu.items() if any(x.ipv4 in addrs for x in ss)), None)
+            echo = {"ipv4Address": device.ipv4Address.model_dump(exclude_none=True)}
+        else:
+            used = "ipv6Address"
+            pdu = await self._pdu_by_supi()
+            supi = next((s for s, ss in pdu.items()
+                         if any(x.ipv6 and _ipv6_match(device.ipv6Address, x.ipv6) for x in ss)), None)
+            echo = {"ipv6Address": device.ipv6Address}
+        if supi is None:
+            raise errors.identifier_not_found()
 
         if pdu is None:
             pdu = await self._pdu_by_supi()
@@ -134,4 +132,5 @@ class Resolver:
             raise errors.service_not_applicable("Device has no active PDU session.")
 
         phone = device.phoneNumber or await self.phone_for_supi(supi)
-        return ResolvedDevice(supi=supi, phone_number=phone, sessions=sessions, matched_by=sorted(candidates))
+        return ResolvedDevice(supi=supi, phone_number=phone, sessions=sessions, matched_by=[used],
+                              device_response=echo)

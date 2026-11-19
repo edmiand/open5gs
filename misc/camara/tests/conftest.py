@@ -14,6 +14,7 @@ from camara_gw.config import Config
 from camara_gw.core.info import InfoClient
 from camara_gw.core.mongo import Store
 from camara_gw.core.sbi import SbiClient
+from camara_gw.notify import Notifier
 
 UE1 = {"imsi": "999700000000001", "msisdn": ["99970000001"], "imeisv": "4370816125816151"}
 UE2 = {"imsi": "999700000000002", "msisdn": ["99970000002"], "imeisv": "4370816125816152"}
@@ -40,7 +41,7 @@ UE_INFO = {"items": [{"supi": "imsi-999700000000001", "pei": "imeisv-43708161258
 def make_cfg(**over) -> Config:
     base = {
         "auth": {"signing_key": "test-key-0123456789abcdef0123456789", "clients": [
-            {"client_id": "demo-app", "client_secret": "s3cret", "scopes": ["lab:read"]},
+            {"client_id": "demo-app", "client_secret": "s3cret", "scopes": ["lab:read", "qos-profiles:read", "quality-on-demand:sessions:create", "quality-on-demand:sessions:read", "quality-on-demand:sessions:update", "quality-on-demand:sessions:delete", "quality-on-demand:sessions:retrieve-by-device"]},
             {"client_id": "no-scope", "client_secret": "s3cret", "scopes": []},
         ]},
         "lab_endpoints": True,
@@ -57,6 +58,18 @@ class FakeCore:
         self.ue_info = UE_INFO
         self.nrf_down: set[str] = set()
         self.calls: list[httpx.Request] = []
+        self.pcf_status = 201
+        self.pcf_bodies: list[dict] = []
+        self.pcf_deletes: list[str] = []
+        self.next_app_id = 1
+        self.sink_events: list[dict] = []
+
+    def add_flow(self, supi: str, qfi: int, fiveqi: int):
+        import copy
+        self.pdu_info = copy.deepcopy(self.pdu_info)
+        for it in self.pdu_info["items"]:
+            if it["supi"] == supi:
+                it["pdu"][0]["qos_flows"].append({"qfi": qfi, "5qi": fiveqi})
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.calls.append(request)
@@ -73,7 +86,26 @@ class FakeCore:
             nf = path.rsplit("/", 1)[1].split("-")[0]
             return httpx.Response(200, json={"nfInstanceId": path, "nfType": nf, "nfStatus": "REGISTERED"})
         if path == "/nbsf-management/v1/pcfBindings":
+            ip = request.url.params.get("ipv4Addr")
+            known = {pdu.get("ipv4") for it in self.pdu_info["items"] for pdu in it["pdu"]}
+            if ip in known:
+                return httpx.Response(200, json={"dnn": "internet",
+                                                 "pcfIpEndPoints": [{"ipv4Address": "127.0.0.13", "port": 7777}]})
             return httpx.Response(404, json={"status": 404})
+        if path == "/npcf-policyauthorization/v1/app-sessions" and request.method == "POST":
+            self.pcf_bodies.append(json.loads(request.content))
+            if self.pcf_status != 201:
+                return httpx.Response(self.pcf_status, json={"status": self.pcf_status, "detail": "pcf says no"})
+            aid = self.next_app_id
+            self.next_app_id += 1
+            return httpx.Response(201, json={}, headers={
+                "location": f"http://127.0.0.13:7777/npcf-policyauthorization/v1/app-sessions/{aid}"})
+        if path.startswith("/npcf-policyauthorization/v1/app-sessions/") and path.endswith("/delete"):
+            self.pcf_deletes.append(path)
+            return httpx.Response(204)
+        if request.url.host == "sink.example":
+            self.sink_events.append(json.loads(request.content))
+            return httpx.Response(204)
         return httpx.Response(404, content=json.dumps({"status": 404}))
 
 
@@ -84,17 +116,23 @@ def core():
 
 @pytest.fixture
 def store():
-    db = mongomock.MongoClient()["open5gs"]
+    db = mongomock.MongoClient(tz_aware=True)["open5gs"]
     db.subscribers.insert_many([dict(UE1), dict(UE2)])
     return Store(db)
 
 
+def build_client(core, store, **cfg_over):
+    cfg = make_cfg(**cfg_over)
+    t = httpx.MockTransport(core.handler)
+    app = create_app(cfg, store=store, sbi=SbiClient(cfg.sbi, transport=t), info=InfoClient(cfg.info, transport=t),
+                     notifier=Notifier(cfg.notify, source="test", transport=t))
+    return TestClient(app, client=("127.0.0.1", 50000))
+
+
 @pytest.fixture
 def client(core, store):
-    cfg = make_cfg()
-    t = httpx.MockTransport(core.handler)
-    app = create_app(cfg, store=store, sbi=SbiClient(cfg.sbi, transport=t), info=InfoClient(cfg.info, transport=t))
-    with TestClient(app) as c:
+    with build_client(core, store, notify={"allow_http_sink": True},
+                      qod={"verify_timeout": 2.0, "expiry_interval": 0.2}) as c:
         yield c
 
 

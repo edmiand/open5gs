@@ -19,8 +19,12 @@ from .core.mongo import Store
 from .core.resolver import Resolver
 from .core.sbi import SbiClient
 from .models import Device
+from .apis import qod as qod_api
+from .apis import qos_profiles as qos_profiles_api
+from .notify import Notifier
+from .profiles import load_profiles
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 
 # ── health ───────────────────────────────────────────────────────────────────
@@ -86,7 +90,7 @@ async def lab_resolve(body: ResolveRequest, request: Request,
 
 # ── factory ──────────────────────────────────────────────────────────────────
 def create_app(cfg: Config | None = None, *, store: Store | None = None, sbi: SbiClient | None = None,
-               info: InfoClient | None = None) -> FastAPI:
+               info: InfoClient | None = None, notifier: Notifier | None = None) -> FastAPI:
     cfg = cfg or load_config()
 
     @asynccontextmanager
@@ -96,9 +100,15 @@ def create_app(cfg: Config | None = None, *, store: Store | None = None, sbi: Sb
         app.state.sbi = sbi or SbiClient(cfg.sbi)
         app.state.info = info or InfoClient(cfg.info)
         app.state.resolver = Resolver(app.state.store, app.state.info)
+        app.state.profiles = load_profiles()
+        app.state.notifier = notifier or Notifier(cfg.notify, source=f"{cfg.qod.callback_base}")
+        app.state.qod = qod_api.QodService(app.state)
+        app.state.qod.start()
         try:
             yield
         finally:
+            await app.state.qod.stop()
+            await app.state.notifier.aclose()
             await app.state.sbi.aclose()
             await app.state.info.aclose()
 
@@ -106,6 +116,9 @@ def create_app(cfg: Config | None = None, *, store: Store | None = None, sbi: Sb
     errors.install(app)
     app.include_router(health_router)
     app.include_router(auth_router)
+    app.include_router(qos_profiles_api.router)
+    app.include_router(qod_api.router)
+    app.include_router(qod_api.internal)
     if cfg.lab_endpoints:
         app.include_router(lab_router)
     return app

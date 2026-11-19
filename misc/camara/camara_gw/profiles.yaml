@@ -1,0 +1,67 @@
+# CAMARA QoS profile catalog for the lab (served by the QoS Profiles API, used by QoD).
+#
+# `fiveqi` must match the PCF mapping in install/etc/open5gs/pcf.yaml (pcf.qos_profiles),
+# and each 5QI needs a PCC rule template on the subscriber (tools/seed_pcc_rules.py).
+# All four use GBR 5QIs, so the requested rates become GBR (targetMin*) / MBR (max*) on the
+# dedicated QoS flow. CAMARA leaves the profile -> network mapping to the operator; these
+# values are a lab choice.
+#
+# Rates are bps; durations are seconds; packetDelayBudget/jitter are milliseconds.
+
+profiles:
+  - name: QOS_E
+    description: Enhanced communication — stable low latency under congestion, limited bandwidth.
+    fiveqi: 3                    # GBR, PDB 50 ms (real-time gaming / V2X)
+    arp_priority: 6
+    targetMinDownstreamRate: 1000000
+    maxDownstreamRate: 2000000
+    targetMinUpstreamRate: 1000000
+    maxUpstreamRate: 2000000
+    packetDelayBudget: 50
+    jitter: 10
+    packetErrorLossRate: 3       # 10^-3
+    priority: 20
+    minDuration: 60
+    maxDuration: 86400
+
+  - name: QOS_S
+    description: Throughput prioritised up to a low limit.
+    fiveqi: 4                    # GBR, PDB 300 ms (non-conversational video)
+    arp_priority: 8
+    targetMinDownstreamRate: 1000000
+    maxDownstreamRate: 5000000
+    targetMinUpstreamRate: 500000
+    maxUpstreamRate: 2000000
+    packetDelayBudget: 300
+    packetErrorLossRate: 6
+    priority: 40
+    minDuration: 60
+    maxDuration: 86400
+
+  - name: QOS_M
+    description: Throughput prioritised up to a medium limit.
+    fiveqi: 4
+    arp_priority: 8
+    targetMinDownstreamRate: 5000000
+    maxDownstreamRate: 20000000
+    targetMinUpstreamRate: 1000000
+    maxUpstreamRate: 5000000
+    packetDelayBudget: 300
+    packetErrorLossRate: 6
+    priority: 40
+    minDuration: 60
+    maxDuration: 86400
+
+  - name: QOS_L
+    description: Throughput prioritised up to a high limit.
+    fiveqi: 4
+    arp_priority: 8
+    targetMinDownstreamRate: 10000000
+    maxDownstreamRate: 100000000
+    targetMinUpstreamRate: 2000000
+    maxUpstreamRate: 20000000
+    packetDelayBudget: 300
+    packetErrorLossRate: 6
+    priority: 40
+    minDuration: 60
+    maxDuration: 86400
