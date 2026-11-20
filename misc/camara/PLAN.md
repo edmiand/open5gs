@@ -198,13 +198,20 @@ Phase 2 notes (2026-11-20):
 - Live: two moves → two `swapped` events; device swap via stored IMEISV; `subscription-ended` on delete.
 - With UERANSIM, a real device swap = change `imeiSv` in the UE config and re-register; the UDR overwrites `imeisv`.
 
-### Phase 3 — Number Verification (2–3 d)
+### Phase 3 — Number Verification (2–3 d) — 🟡 implemented 2026-11-20, device-side live run pending
 - Minimal network-based authorization: `GET /authorize` on `10.45.0.1:8090` that identifies the caller by source IP (SMF `pdu-info` / BSF) and issues an auth code → `POST /oauth2/token` (authorization_code) → token with `sub`=SUPI.
 - `POST /verify` (plain + `hashedPhoneNumber` SHA-256), `GET /device-phone-number`.
 - Ensure no NAT between UE and gateway: the gateway is on the VM and the target is `10.45.0.1`, which is not MASQUERADEd.
 - Demo: `curl --interface uesimtun0` through the flow; wrong number → `false`; call from off-network → `403`.
 
 **Done when:** the true/false/off-network cases all behave per the CAMARA test definitions.
+
+Phase 3 notes (2026-11-20):
+- NV 2.1.1 token rules implemented: 3-legged only, at most 300 s, single use (jti in `camara_used_tokens`, TTL index), no refresh.
+  Codes live in `camara_auth_codes` (TTL index, 60 s, deleted on use). `amr=["network"]` is a lab value.
+- Verified from the VM: off-network → `access_denied`; 2-legged NV scope refused; discovery document.
+- No firewall on the VM (ufw/firewalld/nftables inactive). Lab NAT quirk: VM-local traffic to 10.45.0.1 is
+  MASQUERADEd to 192.168.64.2, so the device step must run on the UERANSIM host.
 
 ### Phase 4 — Device Roaming Status + Subscriptions (2 d)
 - Roaming = AMF `ue-info.nr_tai.plmn` ≠ home PLMN (`999/70`) for that SUPI. Lab override in `camara_overrides` (`{supi, roaming, mcc}`), clearly flagged in responses' logs and README.

@@ -31,6 +31,8 @@ auth:
   issuer: open5gs-camara
   signing_key: CHANGE_ME          # HS256 secret; setup.sh generates one
   token_ttl: 3600
+  nv_token_ttl: 300         # Number Verification: <= 300 s, single use, no refresh
+  code_ttl: 60              # authorization code lifetime
   clients:
     - client_id: demo-app
       client_secret: CHANGE_ME    # setup.sh generates one
@@ -49,6 +51,12 @@ auth:
         - "sim-swap-subscriptions:org.camaraproject.sim-swap-subscriptions.v0.swapped:create"
         - "sim-swap-subscriptions:read"
         - "sim-swap-subscriptions:delete"
+        - "openid"
+        - "number-verification:verify"
+        - "number-verification:device-phone-number:read"
+      # authorization-code flow (Number Verification); the demo reads the code from the Location header
+      redirect_uris:
+        - "https://demo-app.example/callback"
 
 notify:
   allow_http_sink: true     # lab deviation: CAMARA mandates https sinks

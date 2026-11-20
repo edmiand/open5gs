@@ -21,14 +21,15 @@ from .core.sbi import SbiClient
 from .models import Device
 from .apis import qod as qod_api
 from .apis import qos_profiles as qos_profiles_api
-from .apis import sim_swap_subs
+from .apis import number_verification, sim_swap_subs
+from .auth import network_auth
 from .apis.swap import device_swap_router, sim_swap_router
 from .subscriptions import SubscriptionManager
 from .swap_history import SwapHistory
 from .notify import Notifier
 from .profiles import load_profiles
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 
 # ── health ───────────────────────────────────────────────────────────────────
@@ -104,6 +105,7 @@ def create_app(cfg: Config | None = None, *, store: Store | None = None, sbi: Sb
         app.state.sbi = sbi or SbiClient(cfg.sbi)
         app.state.info = info or InfoClient(cfg.info)
         app.state.resolver = Resolver(app.state.store, app.state.info)
+        await network_auth.ensure_indexes(app.state.store.db)
         app.state.profiles = load_profiles()
         app.state.notifier = notifier or Notifier(cfg.notify, source=f"{cfg.qod.callback_base}")
         app.state.qod = qod_api.QodService(app.state)
@@ -134,6 +136,8 @@ def create_app(cfg: Config | None = None, *, store: Store | None = None, sbi: Sb
     app.include_router(sim_swap_router)
     app.include_router(device_swap_router)
     app.include_router(sim_swap_subs.router)
+    app.include_router(network_auth.router)
+    app.include_router(number_verification.router)
     if cfg.lab_endpoints:
         app.include_router(lab_router)
     return app

@@ -40,11 +40,17 @@ def _cfg(request: Request) -> Config:
     return request.app.state.config
 
 
+# Scopes that may only be granted through the network-based authorization-code flow (3-legged)
+THREE_LEGGED_ONLY = frozenset({"openid", "number-verification:verify",
+                               "number-verification:device-phone-number:read"})
+
+
 def issue_token(cfg: Config, client_id: str, scopes: list[str], sub: str | None = None,
-                extra: dict | None = None) -> dict:
+                extra: dict | None = None, ttl: int | None = None) -> dict:
     now = int(time.time())
+    ttl = ttl or cfg.auth.token_ttl
     claims = {
-        "iss": cfg.auth.issuer, "aud": AUDIENCE, "iat": now, "exp": now + cfg.auth.token_ttl,
+        "iss": cfg.auth.issuer, "aud": AUDIENCE, "iat": now, "exp": now + ttl,
         "jti": str(uuid.uuid4()), "client_id": client_id, "scope": " ".join(scopes),
         "sub": sub or client_id,
     }
@@ -53,8 +59,7 @@ def issue_token(cfg: Config, client_id: str, scopes: list[str], sub: str | None 
     if extra:
         claims.update(extra)
     token = jwt.encode(claims, cfg.auth.signing_key, algorithm=ALG)
-    return {"access_token": token, "token_type": "Bearer", "expires_in": cfg.auth.token_ttl,
-            "scope": claims["scope"]}
+    return {"access_token": token, "token_type": "Bearer", "expires_in": ttl, "scope": claims["scope"]}
 
 
 def _basic_creds(request: Request) -> tuple[str, str] | None:
@@ -73,6 +78,16 @@ def _oauth_error(status: int, error: str, desc: str) -> CamaraError:
     return CamaraError(status, error, desc)
 
 
+def authenticate_client(cfg: Config, request: Request, client_id: str | None, client_secret: str | None):
+    creds = _basic_creds(request) or (client_id, client_secret)
+    if not creds[0] or creds[1] is None:
+        raise _oauth_error(401, "invalid_client", "Client authentication required.")
+    client = next((c for c in cfg.auth.clients if c.client_id == creds[0]), None)
+    if client is None or not hmac.compare_digest(client.client_secret.encode(), creds[1].encode()):
+        raise _oauth_error(401, "invalid_client", "Unknown client or bad secret.")
+    return client
+
+
 @router.post("/oauth2/token")
 async def token(
     request: Request,
@@ -80,20 +95,25 @@ async def token(
     scope: str | None = Form(None),
     client_id: str | None = Form(None),
     client_secret: str | None = Form(None),
+    code: str | None = Form(None),
+    redirect_uri: str | None = Form(None),
+    code_verifier: str | None = Form(None),
 ):
     cfg = _cfg(request)
+    client = authenticate_client(cfg, request, client_id, client_secret)
+    if grant_type == "authorization_code":
+        from .network_auth import exchange_code       # avoid import cycle
+        return await exchange_code(request, client, code, redirect_uri, code_verifier)
     if grant_type != "client_credentials":
-        raise _oauth_error(400, "unsupported_grant_type", "Only client_credentials is supported here.")
-    creds = _basic_creds(request) or (client_id, client_secret)
-    if not creds[0] or creds[1] is None:
-        raise _oauth_error(401, "invalid_client", "Client authentication required.")
-    client = next((c for c in cfg.auth.clients if c.client_id == creds[0]), None)
-    if client is None or not hmac.compare_digest(client.client_secret.encode(), creds[1].encode()):
-        raise _oauth_error(401, "invalid_client", "Unknown client or bad secret.")
-    requested = scope.split() if scope else list(client.scopes)
+        raise _oauth_error(400, "unsupported_grant_type", "Use client_credentials or authorization_code.")
+    requested = scope.split() if scope else sorted(set(client.scopes) - THREE_LEGGED_ONLY)
     not_allowed = sorted(set(requested) - set(client.scopes))
     if not_allowed:
         raise _oauth_error(400, "invalid_scope", f"Scope(s) not allowed for client: {' '.join(not_allowed)}")
+    three = sorted(set(requested) & THREE_LEGGED_ONLY)
+    if three:
+        raise _oauth_error(400, "invalid_scope",
+                           f"Scope(s) need network-based authentication (authorization_code): {' '.join(three)}")
     return issue_token(cfg, client.client_id, requested)
 
 

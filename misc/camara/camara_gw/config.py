@@ -40,6 +40,7 @@ class Client(BaseModel):
     client_id: str
     client_secret: str
     scopes: list[str] = Field(default_factory=list)
+    redirect_uris: list[str] = Field(default_factory=list)   # for the authorization-code flow
 
 
 class Auth(BaseModel):
@@ -47,6 +48,9 @@ class Auth(BaseModel):
     signing_key: str
     token_ttl: int = 3600
     clients: list[Client] = Field(default_factory=list)
+    # Number Verification: access tokens <= 300 s, single use, no refresh (NV 2.1.1)
+    nv_token_ttl: int = Field(300, ge=1, le=300)
+    code_ttl: int = 60
 
 
 class Notify(BaseModel):

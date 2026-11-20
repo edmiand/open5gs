@@ -41,7 +41,7 @@ UE_INFO = {"items": [{"supi": "imsi-999700000000001", "pei": "imeisv-43708161258
 def make_cfg(**over) -> Config:
     base = {
         "auth": {"signing_key": "test-key-0123456789abcdef0123456789", "clients": [
-            {"client_id": "demo-app", "client_secret": "s3cret", "scopes": ["lab:read", "qos-profiles:read", "quality-on-demand:sessions:create", "quality-on-demand:sessions:read", "quality-on-demand:sessions:update", "quality-on-demand:sessions:delete", "quality-on-demand:sessions:retrieve-by-device", "sim-swap:retrieve-date", "sim-swap:check", "device-swap:retrieve-date", "device-swap:check", "sim-swap-subscriptions:org.camaraproject.sim-swap-subscriptions.v0.swapped:create", "sim-swap-subscriptions:read", "sim-swap-subscriptions:delete"]},
+            {"client_id": "demo-app", "client_secret": "s3cret", "scopes": ["lab:read", "qos-profiles:read", "quality-on-demand:sessions:create", "quality-on-demand:sessions:read", "quality-on-demand:sessions:update", "quality-on-demand:sessions:delete", "quality-on-demand:sessions:retrieve-by-device", "sim-swap:retrieve-date", "sim-swap:check", "device-swap:retrieve-date", "device-swap:check", "sim-swap-subscriptions:org.camaraproject.sim-swap-subscriptions.v0.swapped:create", "sim-swap-subscriptions:read", "sim-swap-subscriptions:delete", "openid", "number-verification:verify", "number-verification:device-phone-number:read"], "redirect_uris": ["https://demo-app.example/callback"]},
             {"client_id": "no-scope", "client_secret": "s3cret", "scopes": []},
         ]},
         "lab_endpoints": True,
@@ -121,12 +121,12 @@ def store():
     return Store(db)
 
 
-def build_client(core, store, **cfg_over):
+def build_client(core, store, client_addr=("127.0.0.1", 50000), **cfg_over):
     cfg = make_cfg(**cfg_over)
     t = httpx.MockTransport(core.handler)
     app = create_app(cfg, store=store, sbi=SbiClient(cfg.sbi, transport=t), info=InfoClient(cfg.info, transport=t),
                      notifier=Notifier(cfg.notify, source="test", transport=t))
-    return TestClient(app, client=("127.0.0.1", 50000))
+    return TestClient(app, client=client_addr, follow_redirects=False)
 
 
 @pytest.fixture

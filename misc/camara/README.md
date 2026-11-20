@@ -5,8 +5,8 @@ Open5GS 5GC lab. It runs as an AF / "mini-NEF": the APIs are served northbound, 
 calls the core southbound (SBI h2c, the SMF/AMF info endpoints, MongoDB).
 Design, scope and phases: [PLAN.md](PLAN.md).
 
-**Status:** Phase 2 — SIM Swap, Device Swap and SIM Swap Subscriptions; Phase 1 QoS Profiles +
-Quality on Demand; Phase 0 foundations (health, auth, CAMARA error model, device resolver).
+**Status:** Phase 3 — Number Verification with network-based authentication; Phase 2 SIM/Device Swap
+(+ subscriptions); Phase 1 QoS Profiles + Quality on Demand; Phase 0 foundations.
 
 ## Lab prerequisites (Phase 1)
 
@@ -46,7 +46,9 @@ curl -s localhost:8090/health | jq .     # 200 UP / 503 DOWN with per-dependency
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
 | GET | `/health` | none | Mongo, NRF registration of BSF/PCF/UDM, SMF `/pdu-info`, AMF `/ue-info` |
-| POST | `/oauth2/token` | client credentials (Basic or form) | Issues HS256 JWT, `grant_type=client_credentials` |
+| POST | `/oauth2/token` | client credentials (Basic or form) | `client_credentials` (2-legged) or `authorization_code` (+PKCE) → HS256 JWT (+ `id_token`) |
+| GET | `/oauth2/authorize` | none — **network-based** | Must arrive over the UE data path; source IP → live PDU session → SUPI → code (no user interaction); else `error=access_denied` |
+| GET | `/.well-known/openid-configuration` | none | OIDC discovery |
 | POST | `/_lab/resolve` | Bearer, scope `lab:read` | Resolve a CAMARA `device` → SUPI, phone, UE IPs (lab only, `lab_endpoints: true`) |
 | POST | `/qos-profiles/v1/retrieve-qos-profiles` | `qos-profiles:read` | List profiles (filter by name/status/device) |
 | GET | `/qos-profiles/v1/qos-profiles/{name}` | `qos-profiles:read` | One profile |
@@ -59,6 +61,8 @@ curl -s localhost:8090/health | jq .     # 200 UP / 503 DOWN with per-dependency
 | POST | `/device-swap/v1/retrieve-date`, `/device-swap/v1/check` | `device-swap:…` (or `device-swap`) | Same for device (IMEI) changes |
 | POST / GET | `/sim-swap-subscriptions/v0.4/subscriptions` | `…:org.camaraproject.sim-swap-subscriptions.v0.swapped:create` / `…:read` | Create / list (paged) |
 | GET / DELETE | `/sim-swap-subscriptions/v0.4/subscriptions/{id}` | `…:read` / `…:delete` | Get / delete |
+| POST | `/number-verification/v2/verify` | 3-legged `number-verification:verify` | `{phoneNumber}` or `{hashedPhoneNumber}` → `{devicePhoneNumberVerified}` |
+| GET | `/number-verification/v2/device-phone-number` | 3-legged `number-verification:device-phone-number:read` | `{devicePhoneNumber}` |
 
 ### QoD behaviour
 
@@ -86,6 +90,21 @@ curl -s localhost:8090/health | jq .     # 200 UP / 503 DOWN with per-dependency
   subscription; duplicate active subscriptions → 409 `ALREADY_EXISTS`.
 - Lab provisioning helper: `tools/lab_swap.py show | add-spare | move-msisdn | set-imeisv`.
 
+### Number Verification behaviour
+
+- The device calls `http://10.45.0.1:8090/oauth2/authorize?...&scope=openid number-verification:verify` over
+  its data path (`curl --interface uesimtun0` on the UERANSIM host). The gateway maps the source IP via SMF
+  `/pdu-info` to the SUPI and redirects to the registered `redirect_uri` with a 60 s single-use code.
+  Off-network or unknown IPs get `error=access_denied`; unregistered redirect URIs get a 400 with no redirect.
+- The backend exchanges the code (`grant_type=authorization_code`, client secret, optional PKCE S256) for an access
+  token with `sub`=SUPI, `amr=["network"]`, at most 300 s, **single use**, and no refresh token.
+- NV scopes can't be obtained with `client_credentials`. A token without network auth gets
+  403 `NUMBER_VERIFICATION.USER_NOT_AUTHENTICATED_BY_MOBILE_NETWORK`.
+- `hashedPhoneNumber` = SHA-256 hex of the E.164 number including `+`.
+- Lab note: traffic generated *on the VM* towards `10.45.0.1` is MASQUERADEd (it leaves via `lo`, matching
+  `-s 10.45.0.0/16 ! -o ogstun`), so a UE can't be faked from the VM. Real UE traffic arrives on `ogstun`
+  and keeps its source IP.
+
 All errors use the CAMARA `ErrorInfo` shape `{status, code, message}`. `x-correlator` is
 validated and echoed back (generated if absent).
 
@@ -98,6 +117,8 @@ PHONE=+99970000001 UE_IP=10.45.0.2 ./demo/00-foundations.sh
 ./demo/sink.py &                                       # CloudEvents receiver on :9099
 PROFILE=QOS_E DURATION=120 ./demo/01-qod.sh             # profiles → create → AVAILABLE → extend → delete
 ./demo/02-swap.sh                                       # subscribe → SIM swap → device swap → restore
+./demo/03-number-verification.sh                        # prints the device command; then token + verify
+UE_SSH='ssh user@ueransim-host' ./demo/03-number-verification.sh   # fully automatic if SSH works
 ```
 
 For a successful resolve, the demo subscriber needs an MSISDN (WebUI → subscriber → MSISDN), and
