@@ -160,7 +160,7 @@ Estimates are engineer-days. Each phase ends with a working demo script in `demo
 
 **Done when:** `GET /health` shows every southbound reachable, and `resolver` maps the demo UE's phone → SUPI → IP.
 
-### Phase 1 — QoS Profiles + Quality on Demand (2–3 d) — 🟡 implemented 2026-11-19, live QoS-flow check pending UE re-attach
+### Phase 1 — QoS Profiles + Quality on Demand (2–3 d) — ✅ core-verified live 2026-11-20 (⚠️ RAN issue, see below)
 - `profiles.yaml`: QOS_E/S/M/L → 5QI + bitrates + duration limits; add matching `qos_profiles` to `install/etc/open5gs/pcf.yaml`.
 - Add per-subscriber PCC rules (one per 5QI used) for demo subscribers. Script it via Mongo, not by hand in the WebUI.
 - QoD sessions: create → BSF → PCF app-session (qosReference, marBw, fDescs from `applicationServer`/ports); expiry timer; extend; delete; `notifUri` callback → CloudEvent `qos-status-changed`.
@@ -176,6 +176,11 @@ Phase 1 implementation notes (2026-11-19):
 - The PCF terminate callback arrives as h2c → the server switched from uvicorn to Hypercorn.
 - Commonalities: with several device identifiers the provider uses one (phone > IPv4 > IPv6) without cross-checking; `IDENTIFIER_MISMATCH` was removed from the resolver.
 - CAMARA requires https sinks; the lab allows http (`notify.allow_http_sink`).
+
+Live result (2026-11-19/20, QOS_E, AS 198.51.100.10):
+- The PCF built a PCC rule with 5QI 3, MBR 2 Mbps / GBR 1 Mbps, flows to and from the AS. The SMF added **QFI 2 / 5QI 3** next to the default QFI 1 / 5QI 9 → `AVAILABLE` in ~1 s, CloudEvent delivered. Extend and retrieve-sessions worked.
+- At expiry the gateway deleted the app-session, the SMF removed QFI 2, and the sink got `UNAVAILABLE / DURATION_EXPIRED`.
+- ⚠️ **RAN:** when the AMF sent `PDUSessionResourceModifyRequest`, the gNB at 192.168.64.3 closed its SCTP association within 1 ms (AMF: "gNB-N2 connection refused", 0 gNBs, UE idle). The core side is correct. The RAN must support PDU Session Resource Modify for a full end-to-end demo. Open: identify the gNB and its failure (UERANSIM is suspected, not confirmed).
 
 ### Phase 2 — SIM Swap + Device Swap (+ SIM Swap Subscriptions) (2.5–3 d)
 - Poller (2 s) snapshots `msisdn↔imsi` and `imeisv` per IMSI → `camara_events` with timestamps. Seed the baseline on first run.
