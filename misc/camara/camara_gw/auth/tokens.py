@@ -130,6 +130,9 @@ def _principal(request: Request, creds: HTTPAuthorizationCredentials | None) -> 
     except jwt.PyJWTError:
         raise unauthenticated()
     granted = frozenset((claims.get("scope") or "").split())
+    limiter = getattr(request.app.state, "limiter", None)
+    if limiter is not None:
+        limiter.check(claims.get("client_id", claims.get("sub")))
     return Principal(client_id=claims.get("client_id", claims.get("sub")), scopes=granted,
                      sub=claims.get("device_sub"), claims=claims)
 

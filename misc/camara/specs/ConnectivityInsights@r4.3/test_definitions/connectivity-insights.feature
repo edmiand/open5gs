@@ -1,0 +1,225 @@
+Feature: CAMARA Connectivity Insights API, v0.7.0 - Operations for Network Quality
+
+# Input to be provided by the implementation to the tests
+# * apiRoot: API root of the server URL
+# References to OAS spec schemas refer to schemas specified in connectivity-insights.yaml
+
+  Background: Common Connectivity Insights setup
+    Given an environment at "apiRoot"
+    And the resource "/connectivity-insights/v0.7"
+    And the header "Content-Type" is set to "application/json"
+    And the header "Authorization" is set to a valid access token
+    And the header "x-correlator" complies with the schema at "#/components/schemas/XCorrelator"
+
+######### Happy Path Scenarios #################################
+
+  @connectivity_insights_01_check_network_quality_meets_requirements
+  Scenario: Check network quality when it meets application requirements
+    Given a valid application profile exists with ID in the system
+    And a valid network quality insight request body with that application profile ID
+    And the device identified in the request is connected to a network that meets the application requirements
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 200
+    And the response header "Content-Type" is "application/json"
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response body complies with the OAS schema at "#/components/schemas/NetworkQualityInsightResponse"
+    And the response property "$.packetDelayBudget" is "meets the application requirements"
+    And the response property "$.targetMinDownstreamRate" is "meets the application requirements"
+    And the response property "$.targetMinUpstreamRate" is "meets the application requirements"
+    And the response property "$.packetlossErrorRate" is "meets the application requirements"
+    And the response property "$.jitter" is "meets the application requirements"
+
+  @connectivity_insights_02_check_network_quality_unable_to_meet_requirements
+  Scenario: Check network quality when it cannot meet application requirements
+    Given a valid application profile exists with ID in the system
+    And a valid network quality insight request body with that application profile ID
+    And the device identified in the request is connected to a network that cannot meet the application requirements
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 200
+    And the response header "Content-Type" is "application/json"
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response body complies with the OAS schema at "#/components/schemas/NetworkQualityInsightResponse"
+    And at least one of the response properties contains "unable to meet the application requirements"
+
+  @connectivity_insights_03_check_network_quality_with_additional_kpis
+  Scenario: Check network quality with additional KPIs in response
+  # additionalKPIs is optional in the response; this scenario only applies to implementations that return it
+    Given the implementation returns additional KPIs in the response
+    And a valid application profile exists with ID in the system
+    And a valid network quality insight request body with that application profile ID
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 200
+    And the response header "Content-Type" is "application/json"
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response body complies with the OAS schema at "#/components/schemas/NetworkQualityInsightResponse"
+    And the response property "$.additionalKPIs.signalStrength", if present, is one of "excellent", "good", "fair", "poor", "no signal"
+    And the response property "$.additionalKPIs.connectivityType", if present, is one of "5G-SA", "5G-NSA", "4G", "3G"
+
+############### Error response scenarios ###########################
+
+  # 400 Error Scenarios
+
+  @connectivity_insights_05_check_network_quality_with_invalid_request_body
+  Scenario: Check network quality with invalid request body
+    Given the request body is not compliant with the schema "#/components/schemas/NetworkQualityInsightRequest"
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 400
+    And the response property "$.status" is 400
+    And the response property "$.code" is "INVALID_ARGUMENT"
+    And the response property "$.message" contains a user friendly text
+
+  @connectivity_insights_06_check_network_quality_with_invalid_application_profile_id
+  Scenario: Check network quality with invalid application profile ID format
+    Given a valid network quality insight request body
+    And the request body property "$.applicationProfileId" is set to an invalid UUID format
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 400
+    And the response property "$.status" is 400
+    And the response property "$.code" is "INVALID_ARGUMENT"
+    And the response property "$.message" contains a user friendly text
+
+  @connectivity_insights_07_application_server_port_range_out_of_range
+  Scenario: Check network quality with an application server port range whose start is greater than its end
+    Given a valid network quality insight request body
+    And the request body property "$.applicationServerPorts.ranges[0].from" is set to a value greater than "$.applicationServerPorts.ranges[0].to"
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 400
+    And the response property "$.status" is 400
+    And the response property "$.code" is "OUT_OF_RANGE"
+    And the response property "$.message" contains a user friendly text
+
+  # 401 Error Scenarios
+
+  @connectivity_insights_09_no_authorization_header
+  Scenario: No Authorization header
+    Given the header "Authorization" is removed
+    And a valid network quality insight request body
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 401
+    And the response property "$.status" is 401
+    And the response property "$.code" is "UNAUTHENTICATED"
+    And the response property "$.message" contains a user friendly text
+
+  @connectivity_insights_10_expired_access_token
+  Scenario: Expired access token
+    Given the header "Authorization" is set to an expired access token
+    And a valid network quality insight request body
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 401
+    And the response property "$.status" is 401
+    And the response property "$.code" is "UNAUTHENTICATED"
+    And the response property "$.message" contains a user friendly text
+
+  @connectivity_insights_11_invalid_access_token
+  Scenario: Invalid access token
+    Given the header "Authorization" is set to an invalid access token
+    And a valid network quality insight request body
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 401
+    And the response property "$.status" is 401
+    And the response property "$.code" is "UNAUTHENTICATED"
+    And the response property "$.message" contains a user friendly text
+
+  # 403 Error Scenarios
+
+  @connectivity_insights_12_permission_denied
+  Scenario: Client does not have sufficient permissions
+    Given the header "Authorization" is set to a valid access token without required scope
+    And a valid network quality insight request body
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 403
+    And the response property "$.status" is 403
+    And the response property "$.code" is "PERMISSION_DENIED"
+    And the response property "$.message" contains a user friendly text
+
+  # 404 Error Scenarios
+
+  @connectivity_insights_14_application_profile_id_not_found
+  Scenario: Application profile ID not found
+    Given a valid network quality insight request body
+    And the request body property "$.applicationProfileId" is set to a UUID that doesn't exist in the system
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 404
+    And the response property "$.status" is 404
+    And the response property "$.code" is "NOT_FOUND"
+    And the response property "$.message" contains a user friendly text
+
+  @connectivity_insights_15_device_identifier_not_found
+  Scenario: Device identifier not found
+    Given a valid network quality insight request body
+    And the request body property "$.device" contains identifiers not matching any device in the system
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 404
+    And the response property "$.status" is 404
+    And the response property "$.code" is "IDENTIFIER_NOT_FOUND"
+    And the response property "$.message" contains a user friendly text
+
+  # 422 Error Scenarios
+
+  @connectivity_insights_16_missing_identifier
+  Scenario: Check network quality without device identifier with two-legged token
+    Given the header "Authorization" is set to a valid two-legged access token
+    And a valid network quality insight request body
+    And the request body property "$.device" is removed
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 422
+    And the response property "$.status" is 422
+    And the response property "$.code" is "MISSING_IDENTIFIER"
+    And the response property "$.message" contains a user friendly text
+
+  @connectivity_insights_17_unnecessary_identifier
+  Scenario: Check network quality with device identifier and three-legged token
+    Given the header "Authorization" is set to a valid three-legged access token
+    And a valid network quality insight request body
+    And the request body property "$.device" is set to a valid device identifier
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 422
+    And the response property "$.status" is 422
+    And the response property "$.code" is "UNNECESSARY_IDENTIFIER"
+    And the response property "$.message" contains a user friendly text
+
+  @connectivity_insights_18_unsupported_identifier
+  Scenario: None of the provided device identifiers is supported by the implementation
+    Given that some types of device identifiers are not supported by the implementation
+    And the header "Authorization" is set to a valid access token which does not identify a single device
+    And a valid network quality insight request body
+    And the request body property "$.device" only includes device identifiers not supported by the implementation
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 422
+    And the response property "$.status" is 422
+    And the response property "$.code" is "UNSUPPORTED_IDENTIFIER"
+    And the response property "$.message" contains a user friendly text
+
+  # When the service is only offered to certain types of devices or subscriptions, e.g. IoT, B2C, etc.
+  @connectivity_insights_19_service_not_applicable
+  Scenario: Service not available for the device
+    Given that the service is not available for all devices commercialized by the operator
+    And a valid network quality insight request body
+    And a valid device, identified by the token or provided in the request body, for which the service is not applicable
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 422
+    And the response property "$.status" is 422
+    And the response property "$.code" is "SERVICE_NOT_APPLICABLE"
+    And the response property "$.message" contains a user friendly text
+
+  # 429 Error Scenarios
+
+  @connectivity_insights_20_too_many_requests
+  Scenario: Too many requests (rate limit)
+    Given the client has exceeded the rate limit
+    And a valid network quality insight request body
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 429
+    And the response property "$.status" is 429
+    And the response property "$.code" is "TOO_MANY_REQUESTS"
+    And the response property "$.message" contains a user friendly text
+
+  @connectivity_insights_21_quota_exceeded
+  Scenario: Quota exceeded
+    Given the client has exceeded their quota
+    And a valid network quality insight request body
+    When the request "checkNetworkQuality" is sent
+    Then the response code is 429
+    And the response property "$.status" is 429
+    And the response property "$.code" is "QUOTA_EXCEEDED"
+    And the response property "$.message" contains a user friendly text

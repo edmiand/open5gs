@@ -93,6 +93,29 @@ class Resolver:
         msisdns = (doc or {}).get("msisdn") or []
         return e164_from_msisdn(msisdns[0]) if msisdns else None
 
+    async def resolve_supi(self, supi: str, *, require_session: bool = False) -> ResolvedDevice:
+        """Device identified by a 3-legged token subject (SUPI)."""
+        doc = await asyncio.to_thread(self.store.subscriber_by_imsi, supi.removeprefix("imsi-"))
+        if doc is None:
+            raise errors.identifier_not_found()
+        sessions = (await self._pdu_by_supi()).get(supi, [])
+        if require_session and not sessions:
+            raise errors.service_not_applicable("Device has no active PDU session.")
+        return ResolvedDevice(supi=supi, phone_number=await self.phone_for_supi(supi), sessions=sessions,
+                              matched_by=["accessToken"], device_response=None)
+
+    async def resolve_for(self, device: Device | None, principal, *, require_session: bool = False) -> ResolvedDevice:
+        """CAMARA Commonalities device selection:
+        3-legged token (principal.sub) + device -> 422 UNNECESSARY_IDENTIFIER;
+        3-legged token only -> device from the token; 2-legged -> device from the body (required)."""
+        sub = getattr(principal, "sub", None)
+        if sub and device is not None:
+            raise errors.CamaraError(422, "UNNECESSARY_IDENTIFIER",
+                                     "The device is already identified by the access token.")
+        if sub:
+            return await self.resolve_supi(sub, require_session=require_session)
+        return await self.resolve(device, require_session=require_session)
+
     async def resolve(self, device: Device | None, *, require_session: bool = False) -> ResolvedDevice:
         """Resolve a CAMARA Device to a single subscriber.
 

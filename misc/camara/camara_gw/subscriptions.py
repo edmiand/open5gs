@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import errors
-from .auth.tokens import Principal, require_scopes
+from .auth.tokens import Principal, require_any_scope, require_scopes
 from .notify import Notifier, validate_sink
 
 log = logging.getLogger("camara.subs")
@@ -90,7 +90,11 @@ class SubscriptionManager:
             cfg["subscriptionExpireTime"] = _iso(doc["expiresAt"])
         if doc.get("maxEvents"):
             cfg["subscriptionMaxEvents"] = doc["maxEvents"]
-        out = {"id": doc["_id"], "protocol": "HTTP", "sink": doc["sink"], "types": doc["types"], "config": cfg,
+        cred = doc.get("sinkCredential")
+        if cred:      # accessToken is writeOnly
+            cred = {k: v for k, v in cred.items() if k != "accessToken"}
+        out = {"id": doc["_id"], "protocol": "HTTP", "sink": doc["sink"], "sinkCredential": cred or None,
+               "types": doc["types"], "config": cfg,
                "startsAt": _iso(doc.get("startsAt")), "expiresAt": _iso(doc.get("expiresAt")),
                "status": doc["status"]}
         return {k: v for k, v in out.items() if v is not None}
@@ -156,28 +160,25 @@ def make_subscription_router(*, api: str, version: str, event_version: str, even
     def mgr(request: Request) -> SubscriptionManager:
         return request.app.state.subscriptions
 
-    async def create_principal(request: Request, body: SubscriptionRequest) -> Principal:
-        # scope depends on the requested event type: "<api>:<event-type>:create"
-        etype = body.types[0] if body.types else ""
-        dep = require_scopes(f"{api}:{etype}:create")
-        from fastapi.security import HTTPBearer
-        creds = await HTTPBearer(auto_error=False)(request)
-        return await dep(request, creds)
-
     @router.post("/subscriptions", status_code=201)
-    async def create(body: SubscriptionRequest, request: Request):
-        p = await create_principal(request, body)
+    async def create(body: SubscriptionRequest, request: Request,
+                     p: Principal = Depends(require_any_scope(*[f"{api}:{t}:create" for t in sorted(allowed)]))):
+        # order: authenticated (any create scope) -> request validity -> scope for the requested type
         if body.protocol != "HTTP":
             raise errors.CamaraError(400, "INVALID_PROTOCOL", "Only HTTP is supported.")
+        bad = [t for t in body.types if t not in allowed]
+        if bad:
+            raise errors.invalid_argument(f"Unsupported event type {bad[0]}.")
         if len(body.types) != 1:
             raise errors.CamaraError(422, "MULTIEVENT_SUBSCRIPTION_NOT_SUPPORTED",
                                      "Multi-event subscription is not supported.")
-        if body.types[0] not in allowed:
-            raise errors.invalid_argument(f"Unsupported event type {body.types[0]}.")
+        if f"{api}:{body.types[0]}:create" not in p.scopes:
+            raise errors.CamaraError(403, "SUBSCRIPTION_MISMATCH",
+                                     "The access token does not allow subscribing to the requested event type.")
         validate_sink(request.app.state.config.notify, body.sink, body.sinkCredential)
         exp = _aware(body.config.subscriptionExpireTime)
         if exp is not None and exp <= _now():
-            raise errors.CamaraError(400, "OUT_OF_RANGE", "subscriptionExpireTime is in the past.")
+            raise errors.invalid_argument("subscriptionExpireTime is in the past.")
         subject, detail = await resolve_subject(request, body.config.subscriptionDetail, p)
         m = mgr(request)
         dup = await m._find({"api": api, "client_id": p.client_id, "status": "ACTIVE", "types": body.types[0],
@@ -190,6 +191,8 @@ def make_subscription_router(*, api: str, version: str, event_version: str, even
                "maxEvents": body.config.subscriptionMaxEvents, "eventsSent": 0, "status": "ACTIVE"}
         await asyncio.to_thread(m.col.insert_one, doc)
         log.info("subscription %s created: %s %s", doc["_id"], body.types[0], subject)
+        m.notifier.send(doc["sink"], doc.get("sinkCredential"), m._etype(doc, "subscription-started"),
+                        {"subscriptionId": doc["_id"], "initiationReason": "SUBSCRIPTION_CREATED"})
         if body.config.initialEvent and on_created is not None:
             await on_created(request, doc)
         return JSONResponse(SubscriptionManager.render(doc), status_code=201)

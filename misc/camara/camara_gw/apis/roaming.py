@@ -52,9 +52,7 @@ class RoamingStatusRequest(BaseModel):
 async def retrieve(body: RoamingStatusRequest, request: Request,
                    p: Principal = Depends(require_scopes("device-roaming-status:read"))):
     st_ = request.app.state
-    if body.device is not None and p.sub:
-        raise errors.CamaraError(422, "UNNECESSARY_IDENTIFIER", "The device is already identified by the access token.")
-    rd = await st_.resolver.resolve(body.device)
+    rd = await st_.resolver.resolve_for(body.device, p)
     status = await st_.roaming.lookup(rd.supi)
     if status is None:
         raise errors.service_not_applicable("No roaming status is known for this device (never seen by the AMF).")
@@ -70,14 +68,14 @@ async def _resolve_subject(request: Request, detail: dict, p: Principal) -> tupl
     if extra:
         raise errors.invalid_argument(f"Unknown subscriptionDetail field(s): {', '.join(sorted(extra))}")
     raw = (detail or {}).get("device")
-    if raw is not None and p.sub:
-        raise errors.CamaraError(422, "UNNECESSARY_IDENTIFIER", "The device is already identified by the access token.")
     try:
         device = Device.model_validate(raw) if raw is not None else None
     except ValueError as exc:
         raise errors.invalid_argument(f"subscriptionDetail.device: {exc}")
-    rd = await request.app.state.resolver.resolve(device)
-    return {"supi": rd.supi}, {"device": rd.device_response}
+    if device is not None and device.is_empty():
+        raise errors.invalid_argument("subscriptionDetail.device must not be empty.")
+    rd = await request.app.state.resolver.resolve_for(device, p)
+    return {"supi": rd.supi}, ({"device": rd.device_response} if rd.device_response else {})
 
 
 async def _initial_event(request: Request, doc: dict) -> None:

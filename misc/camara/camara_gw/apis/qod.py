@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Path, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .. import errors
@@ -39,19 +39,14 @@ internal = APIRouter(prefix="/_internal/pcf/qod", tags=["internal"], include_in_
 EVENT_TYPE = "org.camaraproject.quality-on-demand.v1.qos-status-changed"
 COLLECTION = "camara_qod_sessions"
 ACTIVE = ("REQUESTED", "AVAILABLE")
+UNAVAILABLE_RETENTION_S = 360     # QoD: an UNAVAILABLE session stays readable for >= 360 s (not after DELETE)
 
 
 # ── request models ───────────────────────────────────────────────────────────
 class PortRange(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
-    from_: int = Field(..., alias="from", ge=0, le=65535)
-    to: int = Field(..., ge=0, le=65535)
-
-    @model_validator(mode="after")
-    def _order(self):
-        if self.from_ > self.to:
-            raise ValueError("port range 'from' must be <= 'to'")
-        return self
+    from_: int = Field(..., alias="from")
+    to: int
 
 
 class PortsSpec(BaseModel):
@@ -63,9 +58,18 @@ class PortsSpec(BaseModel):
     def _non_empty(self):
         if not (self.ranges or self.ports):
             raise ValueError("PortsSpec needs ranges and/or ports")
-        if self.ports and any(not 0 <= p <= 65535 for p in self.ports):
-            raise ValueError("port out of range")
         return self
+
+    def check(self, name: str) -> None:
+        """Semantic checks -> 400 OUT_OF_RANGE (per CAMARA test definitions)."""
+        for p in self.ports or []:
+            if not 0 <= p <= 65535:
+                raise errors.CamaraError(400, "OUT_OF_RANGE", f"{name}: port {p} out of range 0-65535.")
+        for r in self.ranges or []:
+            if not (0 <= r.from_ <= 65535 and 0 <= r.to <= 65535):
+                raise errors.CamaraError(400, "OUT_OF_RANGE", f"{name}: port range out of 0-65535.")
+            if r.from_ > r.to:
+                raise errors.CamaraError(400, "OUT_OF_RANGE", f"{name}: range 'from' is greater than 'to'.")
 
     def tokens(self) -> list[str]:
         return [str(p) for p in (self.ports or [])] + \
@@ -75,7 +79,7 @@ class PortsSpec(BaseModel):
 class ApplicationServer(BaseModel):
     """oneOf {ipAddresses:[...]} | {ipv4Address?, ipv6Address?} (subnets)."""
     model_config = ConfigDict(extra="forbid")
-    ipAddresses: list[str] | None = Field(None, min_length=1)
+    ipAddresses: list[str] | None = Field(None, min_length=1, max_length=16)
     ipv4Address: str | None = None
     ipv6Address: str | None = None
 
@@ -84,6 +88,8 @@ class ApplicationServer(BaseModel):
         subnets = self.ipv4Address is not None or self.ipv6Address is not None
         if bool(self.ipAddresses) == subnets:
             raise ValueError("applicationServer needs either ipAddresses or ipv4Address/ipv6Address")
+        if self.ipAddresses and len(set(self.ipAddresses)) != len(self.ipAddresses):
+            raise ValueError("applicationServer.ipAddresses must be unique")
         try:
             for a in self.ipAddresses or []:
                 ipaddress.ip_address(a)
@@ -227,9 +233,22 @@ class QodService:
             data["statusInfo"] = info
         self.st.notifier.send(doc.get("sink"), doc.get("sinkCredential"), EVENT_TYPE, data)
 
-    async def _owned(self, sid: str, p: Principal) -> dict:
+    @staticmethod
+    def _visible(doc: dict) -> bool:
+        if not doc.get("closed"):
+            return True
+        if doc.get("statusInfo") == "DELETE_REQUESTED":
+            return False
+        closed = doc.get("closedAt")
+        if closed is not None and closed.tzinfo is None:
+            closed = closed.replace(tzinfo=timezone.utc)
+        return closed is not None and (_now() - closed).total_seconds() < UNAVAILABLE_RETENTION_S
+
+    async def _owned(self, sid: str, p: Principal, *, allow_closed: bool = False) -> dict:
         doc = await self._get(sid)
-        if not doc or doc.get("closed") or doc.get("client_id") != p.client_id:
+        ok = doc and doc.get("client_id") == p.client_id and (
+            not doc.get("closed") or (allow_closed and self._visible(doc)))
+        if not ok:
             raise errors.CamaraError(404, "NOT_FOUND", "The specified session does not exist.")
         return doc
 
@@ -242,15 +261,15 @@ class QodService:
             raise errors.CamaraError(422, "QUALITY_ON_DEMAND.QOS_PROFILE_NOT_APPLICABLE",
                                      f"QoS profile {profile.name} is {profile.status}.")
         if not profile.minDuration <= body.duration <= profile.maxDuration:
-            raise errors.CamaraError(400, "QUALITY_ON_DEMAND.DURATION_OUT_OF_RANGE",
+            # The OpenAPI also allows QUALITY_ON_DEMAND.DURATION_OUT_OF_RANGE; the r4.3 test definitions expect this:
+            raise errors.CamaraError(400, "INVALID_ARGUMENT",
                                      f"duration must be between {profile.minDuration} and {profile.maxDuration} s "
                                      f"for {profile.name}.")
-        validate_sink(self.st.config.notify, body.sink, body.sinkCredential)
-        if body.device is not None and p.sub:
-            raise errors.CamaraError(422, "UNNECESSARY_IDENTIFIER",
-                                     "The device is already identified by the access token.")
-
-        rd: ResolvedDevice = await self.st.resolver.resolve(body.device, require_session=True)
+        for name, ps in (("devicePorts", body.devicePorts), ("applicationServerPorts", body.applicationServerPorts)):
+            if ps is not None:
+                ps.check(name)
+        validate_sink(self.st.config.notify, body.sink, body.sinkCredential, unknown_type_code="INVALID_ARGUMENT")
+        rd: ResolvedDevice = await self.st.resolver.resolve_for(body.device, p, require_session=True)
         sess = next((s for s in rd.sessions if s.ipv4), None)
         if sess is None:
             raise errors.service_not_applicable("Device has no IPv4 PDU session (IPv6-only QoD not supported).")
@@ -362,7 +381,7 @@ class QodService:
             self._notify(doc, "UNAVAILABLE", reason)
 
     async def get(self, sid: str, p: Principal) -> dict:
-        return self.session_info(await self._owned(sid, p))
+        return self.session_info(await self._owned(sid, p, allow_closed=True))
 
     async def delete(self, sid: str, p: Principal) -> None:
         doc = await self._owned(sid, p)
@@ -381,10 +400,7 @@ class QodService:
         return self.session_info(await self._get(sid))
 
     async def retrieve(self, body: RetrieveSessionsInput, p: Principal) -> list[dict]:
-        if body.device is not None and p.sub:
-            raise errors.CamaraError(422, "UNNECESSARY_IDENTIFIER",
-                                     "The device is already identified by the access token.")
-        rd = await self.st.resolver.resolve(body.device)
+        rd = await self.st.resolver.resolve_for(body.device, p)
         docs = await self._find({"supi": rd.supi, "client_id": p.client_id, "closed": {"$ne": True}})
         out = []
         for d in docs:
@@ -452,22 +468,22 @@ def _with_location(request: Request, info: dict):
 
 
 @router.get("/sessions/{sessionId}", name="get_session")
-async def get_session(sessionId: str, request: Request,
+async def get_session(sessionId: uuid.UUID, request: Request,
                       p: Principal = Depends(require_scopes("quality-on-demand:sessions:read"))):
-    return await _svc(request).get(sessionId, p)
+    return await _svc(request).get(str(sessionId), p)
 
 
 @router.delete("/sessions/{sessionId}", status_code=204)
-async def delete_session(sessionId: str, request: Request,
+async def delete_session(sessionId: uuid.UUID, request: Request,
                          p: Principal = Depends(require_scopes("quality-on-demand:sessions:delete"))):
-    await _svc(request).delete(sessionId, p)
+    await _svc(request).delete(str(sessionId), p)
     return Response(status_code=204)
 
 
 @router.post("/sessions/{sessionId}/extend")
-async def extend_session(sessionId: str, body: ExtendSessionDuration, request: Request,
+async def extend_session(sessionId: uuid.UUID, body: ExtendSessionDuration, request: Request,
                          p: Principal = Depends(require_scopes("quality-on-demand:sessions:update"))):
-    return await _svc(request).extend(sessionId, body, p)
+    return await _svc(request).extend(str(sessionId), body, p)
 
 
 @router.post("/retrieve-sessions")

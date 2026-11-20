@@ -101,7 +101,7 @@ class ApplicationServer(BaseModel):
 
 class NetworkQualityInsightRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    applicationProfileId: str = Field(..., max_length=256)
+    applicationProfileId: uuid.UUID
     device: Device | None = None
     applicationServer: ApplicationServer
     applicationServerPorts: PortsSpec | None = None
@@ -141,26 +141,28 @@ async def create_profile(body: ApplicationProfileRequest, request: Request,
 
 
 @profiles_router.get("/application-profiles/{applicationProfileId}")
-async def get_profile(applicationProfileId: str, request: Request,
+async def get_profile(applicationProfileId: uuid.UUID, request: Request,
                       p: Principal = Depends(require_scopes("application-profiles:read"))):
-    return _render(await _owned(request, applicationProfileId, p))
+    return _render(await _owned(request, str(applicationProfileId), p))
 
 
 @profiles_router.patch("/application-profiles/{applicationProfileId}")
-async def replace_profile(applicationProfileId: str, body: ApplicationProfileRequest, request: Request,
+async def replace_profile(applicationProfileId: uuid.UUID, body: ApplicationProfileRequest, request: Request,
                           p: Principal = Depends(require_scopes("application-profiles:update"))):
-    await _owned(request, applicationProfileId, p)
+    pid = str(applicationProfileId)
+    await _owned(request, pid, p)
     body.validate_non_empty()
     col = request.app.state.store.db[COLLECTION]
-    await asyncio.to_thread(col.update_one, {"_id": applicationProfileId}, {"$set": _fields(body)})
-    return _render(await _owned(request, applicationProfileId, p))
+    await asyncio.to_thread(col.update_one, {"_id": pid}, {"$set": _fields(body)})
+    return _render(await _owned(request, pid, p))
 
 
 @profiles_router.delete("/application-profiles/{applicationProfileId}", status_code=204)
-async def delete_profile(applicationProfileId: str, request: Request,
+async def delete_profile(applicationProfileId: uuid.UUID, request: Request,
                          p: Principal = Depends(require_scopes("application-profiles:delete"))):
-    await _owned(request, applicationProfileId, p)
-    await asyncio.to_thread(request.app.state.store.db[COLLECTION].delete_one, {"_id": applicationProfileId})
+    pid = str(applicationProfileId)
+    await _owned(request, pid, p)
+    await asyncio.to_thread(request.app.state.store.db[COLLECTION].delete_one, {"_id": pid})
     return Response(status_code=204)
 
 
@@ -195,16 +197,16 @@ def assess(nqt: dict, ping, down_bps: float | None, up_bps: float | None) -> tup
 async def check_network_quality(body: NetworkQualityInsightRequest, request: Request,
                                 p: Principal = Depends(require_scopes("connectivity-insights:check"))):
     st = request.app.state
-    if body.device is not None and p.sub:
-        raise errors.CamaraError(422, "UNNECESSARY_IDENTIFIER", "The device is already identified by the access token.")
     col = st.store.db[COLLECTION]
-    prof = await asyncio.to_thread(col.find_one, {"_id": body.applicationProfileId, "client_id": p.client_id})
+    if body.applicationServerPorts is not None:
+        body.applicationServerPorts.check("applicationServerPorts")
+    prof = await asyncio.to_thread(col.find_one, {"_id": str(body.applicationProfileId), "client_id": p.client_id})
     if not prof:
         raise errors.CamaraError(404, "NOT_FOUND", "The specified application profile does not exist.")
     nqt = prof.get("networkQualityThresholds") or {}
     if not nqt:
         raise errors.invalid_argument("The application profile has no network quality thresholds.")
-    rd = await st.resolver.resolve(body.device, require_session=True)
+    rd = await st.resolver.resolve_for(body.device, p, require_session=True)
     ue_ip = next((s.ipv4 for s in rd.sessions if s.ipv4), None)
     if ue_ip is None:
         raise errors.service_not_applicable("Device has no IPv4 PDU session.")

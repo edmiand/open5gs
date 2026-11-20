@@ -25,6 +25,7 @@ from .apis import number_verification, sim_swap_subs
 from .apis import roaming as roaming_api
 from .apis import connectivity as connectivity_api
 from .probe import Prober
+from .ratelimit import Limiter
 from .roaming import RoamingMonitor
 from .auth import network_auth
 from .apis.swap import device_swap_router, sim_swap_router
@@ -33,7 +34,7 @@ from .swap_history import SwapHistory
 from .notify import Notifier
 from .profiles import load_profiles
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 
 
 # ── health ───────────────────────────────────────────────────────────────────
@@ -121,6 +122,7 @@ def create_app(cfg: Config | None = None, *, store: Store | None = None, sbi: Sb
         if cfg.swap.enabled:
             app.state.swaps.start()
         app.state.prober = Prober(cfg.ci)
+        app.state.limiter = Limiter(cfg.rate_limit)
         app.state.roaming = RoamingMonitor(app.state.store, app.state.info, cfg.home_plmns, cfg.roaming.poll_interval)
         app.state.roaming.listeners.append(roaming_api.roaming_listener(app.state.subscriptions))
         if cfg.roaming.enabled:

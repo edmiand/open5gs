@@ -5,9 +5,10 @@ Open5GS 5GC lab. It runs as an AF / "mini-NEF": the APIs are served northbound, 
 calls the core southbound (SBI h2c, the SMF/AMF info endpoints, MongoDB).
 Design, scope and phases: [PLAN.md](PLAN.md).
 
-**Status:** Phase 5 — Application Profiles + Connectivity Insights; Phase 4 Device Roaming Status
-(+ subscriptions); Phase 3 Number Verification; Phase 2 SIM/Device Swap (+ subscriptions);
-Phase 1 QoS Profiles + Quality on Demand; Phase 0 foundations.
+**Status:** all planned phases implemented (0–6). APIs: QoS Profiles, Quality on Demand, SIM Swap
+(+ subscriptions), Device Swap, Number Verification, Device Roaming Status (+ subscriptions),
+Application Profiles, Connectivity Insights. Conformance vs the CAMARA test definitions:
+[CONFORMANCE.md](CONFORMANCE.md) (373 ✅ / 15 ⚠️ / 0 ⛔ / 2 ➖ of 390 scenarios).
 
 ## Lab prerequisites (Phase 1)
 
@@ -42,7 +43,7 @@ sudo systemctl status open5gs-camara     # if installed as a service
 curl -s localhost:8090/health | jq .     # 200 UP / 503 DOWN with per-dependency checks
 ```
 
-## Endpoints (so far)
+## Endpoints
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
@@ -140,6 +141,15 @@ validated and echoed back (generated if absent).
 
 ## Demo
 
+**Full walkthrough:** `./demo/run-all.sh` (starts the CloudEvents sink on :9099 and runs every step).
+`PAUSE=1` for presenting, `SKIP="1"` to skip QoD (UERANSIM's gNB drops N2 on the QoS-flow modify),
+`UE_SSH=...` to include Number Verification, and `NETEM=1` for the degraded-network step.
+
+**Postman / Bruno:** import `demo/open5gs-camara.postman_collection.json` (regenerate with
+`python3 tools/make_postman.py`). Set `baseUrl`, `clientSecret` (from `config.yaml`) and `sink`.
+
+Individual steps:
+
 ```bash
 ./demo/00-foundations.sh                              # health, token, resolve by phone
 PHONE=+99970000001 UE_IP=10.45.0.2 ./demo/00-foundations.sh
@@ -157,12 +167,25 @@ NETEM=1 ./demo/05-connectivity-insights.sh              # + tc netem on ogstun (
 For a successful resolve, the demo subscriber needs an MSISDN (WebUI → subscriber → MSISDN), and
 for IP resolution the UE needs an active PDU session.
 
-## Tests
+## Tests and conformance
 
 ```bash
-.venv/bin/python -m pytest            # unit tests, core mocked (MockTransport + mongomock)
-.venv/bin/python -m pytest -m live    # live smoke against the running lab (later phases)
+.venv/bin/python -m pytest                              # 150 unit tests, core mocked (MockTransport + mongomock)
+python3 tools/conformance_report.py > CONFORMANCE.md    # regenerate the scenario-by-scenario report
+./setup.sh --specs                                      # re-download pinned OpenAPI specs
 ```
+
+The CAMARA Gherkin test definitions for each pinned release are vendored under
+`specs/<Repo>@<tag>/test_definitions/`. `CONFORMANCE.md` maps every scenario: ✅ supported, ⚠️ partial (with the
+reason), ➖ not applicable. Gaps found during that review are pinned by `tests/test_conformance.py`.
+
+## Operations
+
+- **Rate limiting:** per client, `rate_limit.per_minute` (default 600) → 429 `TOO_MANY_REQUESTS`;
+  `rate_limit.daily_quota` (0 = off) → 429 `QUOTA_EXCEEDED`. In-memory, resets on restart.
+- **Uptime Kuma:** `kuma-push-camara.sh` pushes `/health` to its own Push monitor (separate from the core's
+  `kuma-push.sh`). Config goes in `~/.config/open5gs-camara-kuma.env`; run it from cron every minute.
+- **Logs:** `journalctl -u open5gs-camara -f` (gateway `camara.*` loggers + access log).
 
 ## Implementation notes
 

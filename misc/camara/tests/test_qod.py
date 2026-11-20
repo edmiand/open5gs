@@ -150,6 +150,17 @@ def test_pcf_terminate_callback(client, auth, core):
     r = client.post(f"/_internal/pcf/qod/{sid}/terminate", json={"termCause": "PDU_SESSION_TERMINATION"})
     assert r.status_code == 204
     wait_for(lambda: [e for e in core.sink_events if e["data"].get("statusInfo") == "NETWORK_TERMINATED"])
+    g = client.get(f"/quality-on-demand/v1/sessions/{sid}", headers=auth)          # retained >= 360 s
+    assert g.status_code == 200 and (g.json()["qosStatus"], g.json()["statusInfo"]) == ("UNAVAILABLE", "NETWORK_TERMINATED")
+    # a new session for the same device is allowed (the UNAVAILABLE one doesn't conflict)
+    assert create(client, auth).status_code == 201
+
+
+def test_unavailable_session_released_after_retention(client, auth, core, store):
+    sid = make_available(client, auth, core)
+    store.db[COLLECTION].update_one({"_id": sid}, {"$set": {"expiresAt": datetime.now(timezone.utc) - timedelta(seconds=1)}})
+    wait_for(lambda: client.get(f"/quality-on-demand/v1/sessions/{sid}", headers=auth).json().get("statusInfo") == "DURATION_EXPIRED")
+    store.db[COLLECTION].update_one({"_id": sid}, {"$set": {"closedAt": datetime.now(timezone.utc) - timedelta(seconds=361)}})
     assert client.get(f"/quality-on-demand/v1/sessions/{sid}", headers=auth).status_code == 404
 
 
@@ -163,7 +174,7 @@ def test_retrieve_sessions(client, auth, core):
 
 @pytest.mark.parametrize("over,status,code", [
     ({"qosProfile": "QOS_X"}, 404, "NOT_FOUND"),
-    ({"duration": 5}, 400, "QUALITY_ON_DEMAND.DURATION_OUT_OF_RANGE"),
+    ({"duration": 5}, 400, "INVALID_ARGUMENT"),                       # per r4.3 test definitions
     ({"applicationServer": {"ipv6Address": "2001:db8::/64"}}, 422, "SERVICE_NOT_APPLICABLE"),
     ({"applicationServer": {"ipAddresses": ["1.2.3.4"], "ipv4Address": "1.2.3.0/24"}}, 400, "INVALID_ARGUMENT"),
     ({"device": {"phoneNumber": "+99970000002"}, "applicationServer": {"ipv4Address": "999.1.1.1"}}, 400, "INVALID_ARGUMENT"),

@@ -124,6 +124,8 @@ def test_subscription_lifecycle_and_swapped_event(client, auth, store, core):
     assert r.status_code == 201, r.text
     sub = r.json()
     assert sub["status"] == "ACTIVE" and sub["config"]["subscriptionDetail"] == {"phoneNumber": "+99970000001"}
+    started = wait_for(lambda: [e for e in core.sink_events if e["type"].endswith("subscription-started")])[0]
+    assert started["data"] == {"subscriptionId": sub["id"], "initiationReason": "SUBSCRIPTION_CREATED"}
 
     lst = client.get("/sim-swap-subscriptions/v0.4/subscriptions", headers=auth)
     assert lst.json()["pagination"]["totalCount"] == 1 and lst.headers["X-Total-Count"] == "1"
@@ -163,10 +165,10 @@ def test_subscription_expiry(client, auth, core):
 
 @pytest.mark.parametrize("over,status,code", [
     ({"protocol": "MQTT3"}, 400, "INVALID_PROTOCOL"),
-    ({"types": ["org.camaraproject.sim-swap-subscriptions.v0.other"]}, 403, "PERMISSION_DENIED"),
+    ({"types": ["org.camaraproject.sim-swap-subscriptions.v0.other"]}, 400, "INVALID_ARGUMENT"),
     ({"config": {"subscriptionDetail": {}}}, 422, "MISSING_IDENTIFIER"),
     ({"config": {"subscriptionDetail": {"phoneNumber": "+15550000000"}}}, 404, "IDENTIFIER_NOT_FOUND"),
-    ({"config": {"subscriptionDetail": {"phoneNumber": "+99970000001"}, "subscriptionExpireTime": "2020-01-01T00:00:00Z"}}, 400, "OUT_OF_RANGE"),
+    ({"config": {"subscriptionDetail": {"phoneNumber": "+99970000001"}, "subscriptionExpireTime": "2020-01-01T00:00:00Z"}}, 400, "INVALID_ARGUMENT"),
     ({"sink": "ftp://x"}, 400, "INVALID_SINK"),
 ])
 def test_subscription_errors(client, auth, over, status, code):

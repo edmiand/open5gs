@@ -72,6 +72,7 @@ class Qod(BaseModel):
 class Swap(BaseModel):
     enabled: bool = True
     poll_interval: float = 2.0
+    max_monitored_hours: int = Field(2400, ge=1, le=2400)   # check maxAge above this -> OUT_OF_RANGE
 
 
 class Roaming(BaseModel):
@@ -87,6 +88,12 @@ class Ci(BaseModel):
     iperf_seconds: int = Field(3, ge=1, le=30)
 
 
+class RateLimit(BaseModel):
+    enabled: bool = True
+    per_minute: int = Field(600, ge=1)       # requests per client per rolling minute
+    daily_quota: int = Field(0, ge=0)        # 0 = no quota
+
+
 class Config(BaseModel):
     listen: Listen = Field(default_factory=Listen)
     home_plmn: str | list[str] = "99970"      # MCC+MNC; list for several home PLMNs
@@ -100,6 +107,7 @@ class Config(BaseModel):
     swap: Swap = Field(default_factory=Swap)
     roaming: Roaming = Field(default_factory=lambda: Roaming())
     ci: Ci = Field(default_factory=lambda: Ci())
+    rate_limit: RateLimit = Field(default_factory=lambda: RateLimit())
 
     @property
     def home_plmns(self) -> list[str]:

@@ -20,8 +20,15 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def validate_sink(cfg: Notify, sink: str | None, sink_credential: dict | None) -> None:
-    """Raise CAMARA errors for unusable sink / credential (QoD: 400 INVALID_SINK / INVALID_CREDENTIAL)."""
+def validate_sink(cfg: Notify, sink: str | None, sink_credential: dict | None, *,
+                  unknown_type_code: str = "INVALID_CREDENTIAL") -> None:
+    """Raise CAMARA errors for an unusable sink / sinkCredential.
+
+    credentialType outside the schema enum -> 400 `unknown_type_code` (QoD tests: INVALID_ARGUMENT;
+    subscription tests: INVALID_CREDENTIAL); PRIVATE_KEY_JWT -> 422 PRIVATE_KEY_JWT_NOT_CONFIGURED;
+    ACCESSTOKEN with accessTokenType != bearer -> 400 INVALID_TOKEN; missing accessToken /
+    accessTokenExpiresUtc -> 400 INVALID_ARGUMENT (schema-required).
+    """
     if sink is None:
         if sink_credential is not None:
             raise errors.CamaraError(400, "INVALID_ARGUMENT", "sinkCredential provided without sink.")
@@ -35,8 +42,12 @@ def validate_sink(cfg: Notify, sink: str | None, sink_credential: dict | None) -
         if ctype == "PRIVATE_KEY_JWT":
             raise errors.CamaraError(422, "PRIVATE_KEY_JWT_NOT_CONFIGURED",
                                      "PRIVATE_KEY_JWT sink credentials are not supported.")
-        if ctype != "ACCESSTOKEN" or not sink_credential.get("accessToken"):
-            raise errors.CamaraError(400, "INVALID_CREDENTIAL", "Only ACCESSTOKEN credentials with accessToken are supported.")
+        if ctype != "ACCESSTOKEN":
+            raise errors.CamaraError(400, unknown_type_code, f"Unsupported sinkCredential.credentialType {ctype!r}.")
+        if sink_credential.get("accessTokenType") != "bearer":
+            raise errors.CamaraError(400, "INVALID_TOKEN", "sinkCredential.accessTokenType must be 'bearer'.")
+        if not sink_credential.get("accessToken") or not sink_credential.get("accessTokenExpiresUtc"):
+            raise errors.invalid_argument("sinkCredential requires accessToken and accessTokenExpiresUtc.")
 
 
 class Notifier:

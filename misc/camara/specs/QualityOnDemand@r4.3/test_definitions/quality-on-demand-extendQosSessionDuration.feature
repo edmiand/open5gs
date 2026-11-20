@@ -1,0 +1,236 @@
+Feature: CAMARA Quality On Demand API, v1.2.0 - Operation extendQosSessionDuration
+  # Input to be provided by the implementation to the tester
+  #
+  # Implementation indications:
+  # * apiRoot: API root of the server URL
+  #
+  # Testing assets:
+  # * The sessionId of an existing session with qosStatus "AVAILABLE"
+  # * The sessionId of an existing session with qosStatus "UNAVAILABLE"
+  #
+  # References to OAS spec schemas refer to schemas specified in quality-on-demand.yaml
+
+  Background: Common extendQosSessionDuration setup
+    Given an environment at "apiRoot"
+    And the resource "/quality-on-demand/v1/sessions/{sessionId}/extend"
+    And the header "Content-Type" is set to "application/json"
+    And the header "Authorization" is set to a valid access token
+    And the header "x-correlator" complies with the schema at "#/components/schemas/XCorrelator"
+    # Properties not explicitly overwritten in the Scenarios can take any values compliant with the schema
+    And the request body is set by default to a request body compliant with the schema at "#/components/schemas/ExtendSessionDuration"
+    And the path parameter "sessionId" is set by default to a existing QoS session sessionId
+
+  # Success scenarios
+
+  @quality_on_demand_extendQosSessionDuration_01_generic_success_scenario
+  Scenario: Common validations for any success scenario
+    # Valid testing device and default request body compliant with the schema
+    Given an existing QoS session created by operation createSession with qosStatus "AVAILABLE"
+    And the path parameter "sessionId" is set to the value for that QoS session
+    And the request body property "$.requestedAdditionalDuration" is set to a valid additional session duration
+    When the request "extendQosSessionDuration" is sent
+    Then the response status code is 200
+    And the response header "Content-Type" is "application/json"
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    # The response has to comply with the generic response schema which is part of the spec
+    And the response body complies with the OAS schema at "#/components/schemas/SessionInfo"
+    And the response property "$.device" exists only if provided for createSession and with the same value
+    And the response property "$.applicationServer" has the same value as in the request body
+    And the response property "$.qosProfile" has the value provided for createSession
+    And the response property "$.devicePorts" exists only if provided for createSession and with the same value
+    And the response property "$.applicationServerPorts" exists only if provided for createSession and with the same value
+    And the response property "$.sink" exists only if provided for createSession and with the same value
+    # Implementations may not grant the requested extensions but they duration can not be reduced in any case
+    And the response property "$.duration" is not lower than request property "$.requestedAdditionalDuration"
+
+  @quality_on_demand_extendQosSessionDuration_02_exceed_max_duration
+  Scenario: Extended duration cannot exceed the maxDuration for the QoS profile
+    # Valid testing device and default request body compliant with the schema
+    Given an existing QoS session created by operation createSession with qosStatus "AVAILABLE"
+    And the path parameter "sessionId" is set to the value for that QoS session
+    And the "maxDuration" for the QoS profile of the session as returned by "qos-profiles" API
+    And the request body property "$.requestedAdditionalDuration" is set to a value that added to the existing QoS session "duration" exceeds the "maxDuration" for the QoS Profile
+    When the request "extendQosSessionDuration" is sent
+    Then the response status code is 200
+    And the response header "Content-Type" is "application/json"
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    # The response has to comply with the generic response schema which is part of the spec
+    And the response body complies with the OAS schema at "#/components/schemas/SessionInfo"
+    And the response property "$.duration" does not exceed the "maxDuration" for the QoS Profile
+
+  # Errors 400
+
+  @quality_on_demand_extendQosSessionDuration_400.1_schema_not_compliant
+  Scenario: Invalid Argument. Generic Syntax Exception
+    Given the request body is set to any value which is not compliant with the schema at "#/components/schemas/ExtendSessionDuration"
+    When the request "extendQosSessionDuration" is sent
+    Then the response status code is 400
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.code" is "INVALID_ARGUMENT"
+    And the response property "$.message" contains a user friendly text
+
+  # 404 NOT_FOUND is an alternative if path parameter format is not validated
+  @quality_on_demand_extendQosSessionDuration_400.2_invalid_session_id
+  Scenario: Invalid sessionId
+    Given the path parameter "sessionId" has not a UUID format
+    When the request "extendQosSessionDuration" is sent
+    Then the response status code is 400
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.code" is "INVALID_ARGUMENT"
+    And the response property "$.message" contains a user friendly text
+
+  @quality_on_demand_extendQosSessionDuration_400.3_no_request_body
+  Scenario: Missing request body
+    Given the request body is not included
+    When the request "extendQosSessionDuration" is sent
+    Then the response status code is 400
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 400
+    And the response property "$.code" is "INVALID_ARGUMENT"
+    And the response property "$.message" contains a user friendly text
+
+  @quality_on_demand_extendQosSessionDuration_400.4_empty_request_body
+  Scenario: Empty object as request body
+    Given the request body is set to {}
+    When the request "extendQosSessionDuration" is sent
+    Then the response status code is 400
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 400
+    And the response property "$.code" is "INVALID_ARGUMENT"
+    And the response property "$.message" contains a user friendly text
+
+  @quality_on_demand_extendQosSessionDuration_400.5_invalid_x-correlator
+  Scenario: Invalid x-correlator header
+    Given the header "x-correlator" does not comply with the schema at "#/components/schemas/XCorrelator"
+    When the request "extendQosSessionDuration" is sent
+    Then the response status code is 400
+    And the response property "$.status" is 400
+    And the response property "$.code" is "INVALID_ARGUMENT"
+
+  # Examples: one top-level path, plus one path inside each object-typed property of the request schema
+  @quality_on_demand_extendQosSessionDuration_400.6_request_body_strictness
+  Scenario Outline: Undeclared property in request body
+    Given the request body is set to a valid request body
+    And the request body includes the property "<undeclared_property>" which is not declared in the schema at "#/components/schemas/ExtendSessionDuration"
+    When the request "extendQosSessionDuration" is sent
+    Then the response status code is 400
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 400
+    And the response property "$.code" is "INVALID_ARGUMENT"
+    And the response property "$.message" contains a user friendly text
+
+    Examples:
+      | undeclared_property                   |
+      | $.undeclaredProperty                  |
+
+  # Generic 401 errors
+
+  @quality_on_demand_extendQosSessionDuration_401.1_no_authorization_header
+  Scenario: Error response for no header "Authorization"
+    Given the header "Authorization" is not sent
+    And the request body is set to a valid request body
+    When the request "extendQosSessionDuration" is sent
+    Then the response status code is 401
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 401
+    And the response property "$.code" is "UNAUTHENTICATED"
+    And the response property "$.message" contains a user friendly text
+
+  # In this case both codes could make sense depending on whether the access token can be refreshed or not
+  @quality_on_demand_extendQosSessionDuration_401.2_expired_access_token
+  Scenario: Error response for expired access token
+    Given the header "Authorization" is set to an expired access token
+    And the request body is set to a valid request body
+    When the request "extendQosSessionDuration" is sent
+    Then the response status code is 401
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 401
+    And the response property "$.code" is "UNAUTHENTICATED"
+    And the response property "$.message" contains a user friendly text
+
+  @quality_on_demand_extendQosSessionDuration_401.3_invalid_access_token
+  Scenario: Error response for invalid access token
+    Given the header "Authorization" is set to an invalid access token
+    And the request body is set to a valid request body
+    When the request "extendQosSessionDuration" is sent
+    Then the response status code is 401
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 401
+    And the response property "$.code" is "UNAUTHENTICATED"
+    And the response property "$.message" contains a user friendly text
+
+  # Generic 403 errors
+
+  @quality_on_demand_extendQosSessionDuration_403.1_missing_access_token_scope
+  Scenario: Missing access token scope
+    Given the header "Authorization" is set to an access token that does not include scope "quality-on-demand:sessions:update"
+    When the request "extendQosSessionDuration" is sent
+    Then the response status code is 403
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 403
+    And the response property "$.code" is "PERMISSION_DENIED"
+    And the response property "$.message" contains a user friendly text
+
+  @quality_on_demand_extendQosSessionDuration_403.2_session_token_mismatch
+  Scenario: QoS session not created by the API client given in the access token
+    # To test this, a token have to be obtained for a different client
+    Given the header "Authorization" is set to a valid access token emitted to a client which did not created the QoS session
+    When the request "extendQosSessionDuration" is sent
+    Then the response status code is 403
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 403
+    And the response property "$.code" is "PERMISSION_DENIED"
+    And the response property "$.message" contains a user friendly text
+
+  # Errors 404
+
+  @quality_on_demand_extendQosSessionDuration_404.1_not_found
+  Scenario: sessionId of a non-existing QoS session
+    Given the path parameter "sessionId" is set to a random UUID
+    And the request body is set to a valid request body
+    When the request "extendQosSessionDuration" is sent
+    Then the response status code is 404
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 404
+    And the response property "$.code" is "NOT_FOUND"
+    And the response property "$.message" contains a user friendly text
+
+  # Errors 409
+
+  @quality_on_demand_extendQosSessionDuration_409.1_session_not_available
+  Scenario: Extending duration for session with qosStatus not available
+    Given an existing QoS session with qosStatus not "AVAILABLE"
+    And the path parameter "sessionId" is set to the value for that QoS session
+    And the request body is set to a valid request body
+    When the request "extendQosSessionDuration" is sent
+    Then the response status code is 409
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 409
+    And the response property "$.code" is "QUALITY_ON_DEMAND.SESSION_EXTENSION_NOT_ALLOWED"
+    And the response property "$.message" contains a user friendly text
+
+  # Errors 429
+
+  @quality_on_demand_extendQosSessionDuration_429.1_too_many_requests
+  # To test this scenario the environment has to be configured to reject requests reaching the threshold limit set.
+  Scenario: Request is rejected due to threshold policy
+    Given a valid request for "extendQosSessionDuration"
+    And the header "Authorization" is set to a valid access token
+    And the threshold of requests has been reached
+    When the request "extendQosSessionDuration" is sent
+    Then the response status code is 429
+    And the response property "$.status" is 429
+    And the response property "$.code" is "TOO_MANY_REQUESTS"
+    And the response property "$.message" contains a user friendly text

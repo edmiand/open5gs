@@ -25,6 +25,11 @@ async def _resolve(request: Request, detail: dict, p: Principal) -> tuple[dict, 
         raise errors.invalid_argument(f"Unknown subscriptionDetail field(s): {', '.join(sorted(extra))}")
     if phone and p.sub:
         raise errors.CamaraError(422, "UNNECESSARY_IDENTIFIER", "The phone number is already identified by the access token.")
+    if p.sub:
+        tok_phone = await request.app.state.resolver.phone_for_supi(p.sub)
+        if tok_phone is None:
+            raise errors.service_not_applicable("No phone number is allocated to the device.")
+        return {"msisdn": msisdn_from_e164(tok_phone)}, {}
     if not phone:
         raise errors.missing_identifier("The phone number cannot be identified.")
     if not E164_RE.match(phone):

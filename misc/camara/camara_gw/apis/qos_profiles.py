@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .. import errors
@@ -25,12 +25,9 @@ class QosProfileDeviceRequest(BaseModel):
 async def retrieve_qos_profiles(body: QosProfileDeviceRequest, request: Request,
                                 p: Principal = Depends(require_scopes(SCOPE))):
     st = request.app.state
-    if body.device is not None:
-        if p.sub:
-            raise errors.CamaraError(422, "UNNECESSARY_IDENTIFIER",
-                                     "The device is already identified by the access token.")
+    if body.device is not None or p.sub:
         # All lab profiles are available to any subscriber that exists; resolution validates the device.
-        await st.resolver.resolve(body.device)
+        await st.resolver.resolve_for(body.device, p)
     out = [pr.to_camara() for pr in st.profiles.values()
            if (body.name is None or pr.name == body.name) and (body.status is None or pr.status == body.status)]
     if not out:
@@ -39,7 +36,7 @@ async def retrieve_qos_profiles(body: QosProfileDeviceRequest, request: Request,
 
 
 @router.get("/qos-profiles/{name}")
-async def get_qos_profile(name: str, request: Request, _: Principal = Depends(require_scopes(SCOPE))):
+async def get_qos_profile(request: Request, name: str = Path(..., min_length=3, max_length=256, pattern=NAME_PATTERN), _: Principal = Depends(require_scopes(SCOPE))):
     pr = request.app.state.profiles.get(name)
     if pr is None:
         raise errors.CamaraError(404, "NOT_FOUND", f"QoS profile {name} not found.")

@@ -97,5 +97,10 @@ ci:                         # Connectivity Insights probes (towards the UE via o
   iperf_port: 5201
   iperf_seconds: 3
 
+rate_limit:                 # per client; 429 TOO_MANY_REQUESTS / QUOTA_EXCEEDED
+  enabled: true
+  per_minute: 600
+  daily_quota: 0            # 0 = unlimited
+
 # Lab-only helper endpoints under /_lab (resolver checks, overrides). Disable for anything but the lab.
 lab_endpoints: true

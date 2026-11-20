@@ -106,7 +106,8 @@ def test_check_degraded(client, auth):
 
 def test_check_errors(client, auth):
     client.app.state.prober = FakeProber([1.0] * 20)
-    assert check(client, auth, "nope").json()["code"] == "NOT_FOUND"
+    assert check(client, auth, "nope").json()["code"] == "INVALID_ARGUMENT"                       # not a UUID
+    assert check(client, auth, "6f1c3f3e-0000-4000-8000-000000000000").json()["code"] == "NOT_FOUND"
     pid = make_profile(client, auth, LENIENT)
     assert check(client, auth, pid, {"phoneNumber": "+15550000000"}).json()["code"] == "IDENTIFIER_NOT_FOUND"
     r = client.post("/connectivity-insights/v0.7/check-network-quality",

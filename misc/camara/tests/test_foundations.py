@@ -104,7 +104,7 @@ def test_resolve_multi_identifier_uses_phone_without_crosscheck(client, auth):
     ({"phoneNumber": "+99970000009"}, 404, "IDENTIFIER_NOT_FOUND"),
     ({"ipv4Address": {"privateAddress": "10.45.9.9"}}, 404, "IDENTIFIER_NOT_FOUND"),
     ({"networkAccessIdentifier": "user@example.com"}, 422, "UNSUPPORTED_IDENTIFIER"),
-    ({}, 422, "MISSING_IDENTIFIER"),
+    ({}, 400, "INVALID_ARGUMENT"),                                      # empty device object (minProperties 1)
     ({"phoneNumber": "99970000001"}, 400, "INVALID_ARGUMENT"),           # not E.164
 ])
 def test_resolve_errors(client, auth, device, status, code):

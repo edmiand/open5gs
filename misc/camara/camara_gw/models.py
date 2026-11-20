@@ -29,5 +29,11 @@ class Device(BaseModel):
     ipv4Address: DeviceIpv4Addr | None = None
     ipv6Address: str | None = None
 
+    @model_validator(mode="after")
+    def _min_properties(self):
+        if self.is_empty():
+            raise ValueError("device must contain at least one identifier")
+        return self
+
     def is_empty(self) -> bool:
         return not (self.phoneNumber or self.networkAccessIdentifier or self.ipv4Address or self.ipv6Address)
