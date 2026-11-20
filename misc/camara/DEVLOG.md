@@ -42,7 +42,7 @@ presenting: [demo/POC-RUNBOOK.md](demo/POC-RUNBOOK.md) · conformance: [CONFORMA
 
 | Item | Status | Notes |
 |---|---|---|
-| Story 3 RAN | **user deciding** | UERANSIM's gNB drops N2 on `PDUSessionResourceModifyRequest` → QoD verified in the core only. Options: srsRAN/OAI gNB, or patch UERANSIM. |
+| Story 3 RAN | **user deciding** | UERANSIM's gNB drops N2 on `PDUSessionResourceModifyRequest` → QoD verified in the core only (UERANSIM issue #344: the maintainer confirms Modify isn't supported). Researched 2026-11-20, see "RAN options for Story 3" below. |
 | ES256 + JWKS token signing | deferred (recommended) | Lets the EQTY gateway verify `id_token` (`sub`, `amr=network`) itself, like a real carrier. ~0.5 d. |
 | Gateway audit log | deferred (recommended) | client, API, hashed subject, result, `x-correlator`; EQTY passes its decision id as `x-correlator`. ~0.5 d. |
 | Signed API responses | not recommended | Not CAMARA; no carrier offers it. |
@@ -51,6 +51,21 @@ presenting: [demo/POC-RUNBOOK.md](demo/POC-RUNBOOK.md) · conformance: [CONFORMA
 | iperf3 throughput KPIs | optional | `sudo apt install iperf3` on the VM, `iperf3 -s` on the UE host, `ci.iperf_enabled: true`. |
 | Kuma monitor for the gateway | optional | `kuma-push-camara.sh` + `~/.config/open5gs-camara-kuma.env` + cron. |
 | Story 1 decision flow | decided: **flow B** | NV 3-legged (1 redirect) → Device Identifier `match-identifier` 2-legged by verified MSISDN → Device Swap `check`. |
+
+## RAN options for Story 3 (researched 2026-11-20, not yet tested)
+
+1. **OAI gNB + nrUE in RFsimulator** (software-only): the first candidate. OAI MR !3814 "Multi-QoS Handling and PDU Session
+   Modify" reportedly validated with Open5GS; GBR limit of 2 flows per DRB. **To verify:** MR merged state (GitLab returned
+   429), build on the target host's architecture, nrUE uplink QFI marking (a fork PR reported a dedicated-QFI bug in RFsim).
+   Spike: ~0.5–1 d.
+2. **srsRAN Project gNB + srsUE over ZMQ**: needs `qos.yml` entries for the 5QIs used (3 and 4). Modify support with srsUE
+   is not confirmed. Fallback.
+3. **OMEC gnbsim**: PDU session modification merged Sep 2026 (PR #520); generates UL user-plane traffic; validated on
+   SD-Core, not Open5GS. A profile-driven test tool, not a persistent UE with a tun interface → proves the signalling, not a
+   live video demo.
+4. **Patch UERANSIM** (gNB: answer PDU Session Resource Modify; UE: accept the NAS modification command): keeps the
+   current setup; est. 1–2 d C++; risky.
+5. **Amarisoft** (commercial): known to work, costs money.
 
 ## Lab changes outside the repo (to know / undo)
 
