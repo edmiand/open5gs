@@ -54,10 +54,13 @@ presenting: [demo/POC-RUNBOOK.md](demo/POC-RUNBOOK.md) · conformance: [CONFORMA
 
 ## RAN options for Story 3 (researched 2026-11-20, not yet tested)
 
-1. **OAI gNB + nrUE in RFsimulator** (software-only): the first candidate. OAI MR !3814 "Multi-QoS Handling and PDU Session
-   Modify" reportedly validated with Open5GS; GBR limit of 2 flows per DRB. **To verify:** MR merged state (GitLab returned
-   429), build on the target host's architecture, nrUE uplink QFI marking (a fork PR reported a dedicated-QFI bug in RFsim).
-   Spike: ~0.5–1 d.
+1. **OAI gNB + nrUE in RFsimulator** (software-only): the first candidate. Source on GitHub:
+   **https://github.com/duranta-project/openairinterface5g** (branch `develop`, primary; `openairinterface/openairinterface5g`
+   is a read-only mirror of it). Checked 2026-11-20: the gNB decodes `PDUSessionResourceModifyRequest` incl.
+   QosFlowAddOrModify/Release lists (`openair3/NGAP/ngap_gNB_handlers.c`, `rrc_gNB_process_NGAP_PDUSESSION_MODIFY_REQ`);
+   nrUE PDU Session Modification + UL QoS-flow matching merged in PR #432 (2026-10-09). Open: PR #831 (E1AP DRBs on modify,
+   only matters for a split CU-CP/CU-UP setup; use a monolithic gNB) and PR #1131 (nrUE initial QoS rules). Not yet tested with
+   Open5GS here; check that it builds/performs on the target host's architecture. Spike: ~0.5–1 d.
 2. **srsRAN Project gNB + srsUE over ZMQ**: needs `qos.yml` entries for the 5QIs used (3 and 4). Modify support with srsUE
    is not confirmed. Fallback.
 3. **OMEC gnbsim**: PDU session modification merged Sep 2026 (PR #520); generates UL user-plane traffic; validated on
