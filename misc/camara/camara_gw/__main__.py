@@ -6,6 +6,7 @@ h2c prior-knowledge (Open5GS PCF/SCP callbacks). Uvicorn has no h2c support.
 
 import argparse
 import asyncio
+import logging
 
 from hypercorn.asyncio import serve
 from hypercorn.config import Config as HcConfig
@@ -19,6 +20,8 @@ def main() -> None:
     ap.add_argument("--config", help="path to config.yaml (default: $CAMARA_CONFIG or misc/camara/config.yaml)")
     args = ap.parse_args()
     cfg = load_config(args.config)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     hc = HcConfig()
     hc.bind = [f"{cfg.listen.host}:{cfg.listen.port}"]
     hc.accesslog = "-"

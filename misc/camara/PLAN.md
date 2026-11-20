@@ -182,13 +182,21 @@ Live result (2026-11-19/20, QOS_E, AS 198.51.100.10):
 - At expiry the gateway deleted the app-session, the SMF removed QFI 2, and the sink got `UNAVAILABLE / DURATION_EXPIRED`.
 - ⚠️ **RAN:** when the AMF sent `PDUSessionResourceModifyRequest`, the gNB at 192.168.64.3 closed its SCTP association within 1 ms (AMF: "gNB-N2 connection refused", 0 gNBs, UE idle). The core side is correct. The RAN must support PDU Session Resource Modify for a full end-to-end demo. Open: identify the gNB and its failure (UERANSIM is suspected, not confirmed).
 
-### Phase 2 — SIM Swap + Device Swap (+ SIM Swap Subscriptions) (2.5–3 d)
+### Phase 2 — SIM Swap + Device Swap (+ SIM Swap Subscriptions) (2.5–3 d) — ✅ verified live 2026-11-20
 - Poller (2 s) snapshots `msisdn↔imsi` and `imeisv` per IMSI → `camara_events` with timestamps. Seed the baseline on first run.
 - `retrieve-date` / `check` (maxAge hours). Return `latestSimChange: null` and `monitoredPeriod` per spec when no history exists.
 - SIM Swap Subscriptions: create/list/get/delete; the poller emits CloudEvent `org.camaraproject.sim-swap-subscriptions.v0.swapped` to the `sink`. This introduces `notify.py` + `demo/sink.py` here (Phase 4 then reuses them).
 - Demo: move an MSISDN between two IMSIs (script, mirrors a WebUI edit); change `imeiSv` in the UERANSIM UE config and re-register; the sink prints the "swapped" alert live.
 
 **Done when:** both `check` endpoints flip from `false` to `true` after the scripted swap, and the subscribed sink receives the `swapped` event.
+
+Phase 2 notes (2026-11-20):
+- Device swap compares the **IMEI** (first 14 digits of the IMEISV), so a software-version change isn't a swap.
+- A disappearing MSISDN keeps its last IMSI in the snapshot, so a WebUI remove-then-add is one swap.
+- Generic `SubscriptionManager` + router factory (`camara_gw/subscriptions.py`) is ready for Phase 4 roaming subscriptions.
+- Spare SIM `999700000000002` (cloned keys, no MSISDN) was added to the lab DB for the demo (`tools/lab_swap.py add-spare`).
+- Live: two moves → two `swapped` events; device swap via stored IMEISV; `subscription-ended` on delete.
+- With UERANSIM, a real device swap = change `imeiSv` in the UE config and re-register; the UDR overwrites `imeisv`.
 
 ### Phase 3 — Number Verification (2–3 d)
 - Minimal network-based authorization: `GET /authorize` on `10.45.0.1:8090` that identifies the caller by source IP (SMF `pdu-info` / BSF) and issues an auth code → `POST /oauth2/token` (authorization_code) → token with `sub`=SUPI.
@@ -202,7 +210,7 @@ Live result (2026-11-19/20, QOS_E, AS 198.51.100.10):
 - Roaming = AMF `ue-info.nr_tai.plmn` ≠ home PLMN (`999/70`) for that SUPI. Lab override in `camara_overrides` (`{supi, roaming, mcc}`), clearly flagged in responses' logs and README.
 - MCC → ISO 3166 country table (vendored).
 - Subscriptions: create/list/get/delete, `subscriptionExpireTime`, `subscriptionMaxEvents`, `initialEvent`; roaming poller → CloudEvents to `sink`; `subscription-ends` on expiry/delete.
-- Reuse `notify.py` / `demo/sink.py` from Phase 2.
+- Reuse `notify.py` / `demo/sink.py` and `subscriptions.py` (generic manager) from Phase 2.
 
 **Done when:** toggling the override fires `roaming-on`, then `roaming-change-country`, then `roaming-off`, and the sink receives them.
 

@@ -5,8 +5,8 @@ Open5GS 5GC lab. It runs as an AF / "mini-NEF": the APIs are served northbound, 
 calls the core southbound (SBI h2c, the SMF/AMF info endpoints, MongoDB).
 Design, scope and phases: [PLAN.md](PLAN.md).
 
-**Status:** Phase 1 — QoS Profiles + Quality on Demand on top of the Phase 0 foundations
-(health, auth, CAMARA error model, device resolver).
+**Status:** Phase 2 — SIM Swap, Device Swap and SIM Swap Subscriptions; Phase 1 QoS Profiles +
+Quality on Demand; Phase 0 foundations (health, auth, CAMARA error model, device resolver).
 
 ## Lab prerequisites (Phase 1)
 
@@ -55,6 +55,10 @@ curl -s localhost:8090/health | jq .     # 200 UP / 503 DOWN with per-dependency
 | POST | `/quality-on-demand/v1/sessions/{id}/extend` | `…:update` | Extend (capped at profile maxDuration) |
 | POST | `/quality-on-demand/v1/retrieve-sessions` | `…:retrieve-by-device` | Sessions of a device |
 | POST | `/_internal/pcf/qod/{id}/terminate` | loopback only | PCF → gateway termination callback (h2c) |
+| POST | `/sim-swap/v2/retrieve-date`, `/sim-swap/v2/check` | `sim-swap:retrieve-date` / `sim-swap:check` (or `sim-swap`) | Latest SIM change / swapped within `maxAge` hours |
+| POST | `/device-swap/v1/retrieve-date`, `/device-swap/v1/check` | `device-swap:…` (or `device-swap`) | Same for device (IMEI) changes |
+| POST / GET | `/sim-swap-subscriptions/v0.4/subscriptions` | `…:org.camaraproject.sim-swap-subscriptions.v0.swapped:create` / `…:read` | Create / list (paged) |
+| GET / DELETE | `/sim-swap-subscriptions/v0.4/subscriptions/{id}` | `…:read` / `…:delete` | Get / delete |
 
 ### QoD behaviour
 
@@ -68,6 +72,20 @@ curl -s localhost:8090/health | jq .     # 200 UP / 503 DOWN with per-dependency
 - Events: `org.camaraproject.quality-on-demand.v1.qos-status-changed` CloudEvents to `sink`.
   CAMARA requires https sinks; the lab allows http via `notify.allow_http_sink: true`.
 
+### Swap behaviour
+
+- A poller (`swap.poll_interval`, 2 s) snapshots `subscribers` and records changes in `camara_events`:
+  **SIM_SWAP** when an MSISDN moves to a different IMSI (remove-then-add counts as one swap), and
+  **DEVICE_SWAP** when the IMEI (first 14 digits of the IMEISV the UDR stores at registration) changes.
+  A software-version-only change is not a device swap.
+- History starts at the first poll (`camara_snapshots.monitoring_since`). With no swap since then,
+  `retrieve-date` returns `null` + `monitoredPeriod` (days) and `check` returns `false`.
+- Timestamps are detection times (±poll interval).
+- SIM swap subscriptions: `swapped` CloudEvents `{phoneNumber, subscriptionId}`; `subscriptionExpireTime`,
+  `subscriptionMaxEvents`, and `subscription-ended` on delete/expiry/max events. One event type per
+  subscription; duplicate active subscriptions → 409 `ALREADY_EXISTS`.
+- Lab provisioning helper: `tools/lab_swap.py show | add-spare | move-msisdn | set-imeisv`.
+
 All errors use the CAMARA `ErrorInfo` shape `{status, code, message}`. `x-correlator` is
 validated and echoed back (generated if absent).
 
@@ -79,6 +97,7 @@ PHONE=+99970000001 UE_IP=10.45.0.2 ./demo/00-foundations.sh
 
 ./demo/sink.py &                                       # CloudEvents receiver on :9099
 PROFILE=QOS_E DURATION=120 ./demo/01-qod.sh             # profiles → create → AVAILABLE → extend → delete
+./demo/02-swap.sh                                       # subscribe → SIM swap → device swap → restore
 ```
 
 For a successful resolve, the demo subscriber needs an MSISDN (WebUI → subscriber → MSISDN), and

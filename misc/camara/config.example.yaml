@@ -42,6 +42,13 @@ auth:
         - "quality-on-demand:sessions:update"
         - "quality-on-demand:sessions:delete"
         - "quality-on-demand:sessions:retrieve-by-device"
+        - "sim-swap:retrieve-date"
+        - "sim-swap:check"
+        - "device-swap:retrieve-date"
+        - "device-swap:check"
+        - "sim-swap-subscriptions:org.camaraproject.sim-swap-subscriptions.v0.swapped:create"
+        - "sim-swap-subscriptions:read"
+        - "sim-swap-subscriptions:delete"
 
 notify:
   allow_http_sink: true     # lab deviation: CAMARA mandates https sinks
@@ -53,6 +60,10 @@ qod:
   verify_timeout: 10.0                   # wait for the dedicated QoS flow in SMF /pdu-info
   expiry_interval: 1.0
   af_app_id: camara-qod
+
+swap:
+  enabled: true
+  poll_interval: 2.0        # seconds between subscriber snapshots (swap detection granularity)
 
 # Lab-only helper endpoints under /_lab (resolver checks, overrides). Disable for anything but the lab.
 lab_endpoints: true

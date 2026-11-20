@@ -102,21 +102,39 @@ def decode(cfg: Config, token: str) -> dict:
                       issuer=cfg.auth.issuer, options={"require": ["exp", "iat", "iss", "aud"]})
 
 
+def _principal(request: Request, creds: HTTPAuthorizationCredentials | None) -> Principal:
+    if creds is None or creds.scheme.lower() != "bearer":
+        raise unauthenticated()
+    try:
+        claims = decode(_cfg(request), creds.credentials)
+    except jwt.PyJWTError:
+        raise unauthenticated()
+    granted = frozenset((claims.get("scope") or "").split())
+    return Principal(client_id=claims.get("client_id", claims.get("sub")), scopes=granted,
+                     sub=claims.get("device_sub"), claims=claims)
+
+
 def require_scopes(*scopes: str):
     """Dependency: valid bearer JWT carrying all `scopes`."""
 
     async def dep(request: Request,
                   creds: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> Principal:
-        if creds is None or creds.scheme.lower() != "bearer":
-            raise unauthenticated()
-        try:
-            claims = decode(_cfg(request), creds.credentials)
-        except jwt.PyJWTError:
-            raise unauthenticated()
-        granted = frozenset((claims.get("scope") or "").split())
-        if not set(scopes) <= granted:
+        p = _principal(request, creds)
+        if not set(scopes) <= p.scopes:
             raise permission_denied()
-        return Principal(client_id=claims.get("client_id", claims.get("sub")), scopes=granted,
-                         sub=claims.get("device_sub"), claims=claims)
+        return p
+
+    return dep
+
+
+def require_any_scope(*scopes: str):
+    """Dependency: valid bearer JWT carrying at least one of `scopes` (OpenAPI security alternatives)."""
+
+    async def dep(request: Request,
+                  creds: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> Principal:
+        p = _principal(request, creds)
+        if not set(scopes) & p.scopes:
+            raise permission_denied()
+        return p
 
     return dep

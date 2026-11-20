@@ -21,10 +21,14 @@ from .core.sbi import SbiClient
 from .models import Device
 from .apis import qod as qod_api
 from .apis import qos_profiles as qos_profiles_api
+from .apis import sim_swap_subs
+from .apis.swap import device_swap_router, sim_swap_router
+from .subscriptions import SubscriptionManager
+from .swap_history import SwapHistory
 from .notify import Notifier
 from .profiles import load_profiles
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 
 # ── health ───────────────────────────────────────────────────────────────────
@@ -104,9 +108,17 @@ def create_app(cfg: Config | None = None, *, store: Store | None = None, sbi: Sb
         app.state.notifier = notifier or Notifier(cfg.notify, source=f"{cfg.qod.callback_base}")
         app.state.qod = qod_api.QodService(app.state)
         app.state.qod.start()
+        app.state.subscriptions = SubscriptionManager(app.state.store, app.state.notifier)
+        app.state.subscriptions.start()
+        app.state.swaps = SwapHistory(app.state.store, cfg.swap.poll_interval)
+        app.state.swaps.listeners.append(sim_swap_subs.swap_listener(app.state.subscriptions))
+        if cfg.swap.enabled:
+            app.state.swaps.start()
         try:
             yield
         finally:
+            await app.state.swaps.stop()
+            await app.state.subscriptions.stop()
             await app.state.qod.stop()
             await app.state.notifier.aclose()
             await app.state.sbi.aclose()
@@ -119,6 +131,9 @@ def create_app(cfg: Config | None = None, *, store: Store | None = None, sbi: Sb
     app.include_router(qos_profiles_api.router)
     app.include_router(qod_api.router)
     app.include_router(qod_api.internal)
+    app.include_router(sim_swap_router)
+    app.include_router(device_swap_router)
+    app.include_router(sim_swap_subs.router)
     if cfg.lab_endpoints:
         app.include_router(lab_router)
     return app

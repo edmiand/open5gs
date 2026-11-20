@@ -65,6 +65,11 @@ class Qod(BaseModel):
     af_app_id: str = "camara-qod"
 
 
+class Swap(BaseModel):
+    enabled: bool = True
+    poll_interval: float = 2.0
+
+
 class Config(BaseModel):
     listen: Listen = Field(default_factory=Listen)
     home_plmn: str = "99970"
@@ -75,6 +80,7 @@ class Config(BaseModel):
     lab_endpoints: bool = False
     notify: Notify = Field(default_factory=Notify)
     qod: Qod = Field(default_factory=Qod)
+    swap: Swap = Field(default_factory=Swap)
 
 
 def load_config(path: str | os.PathLike | None = None) -> Config:
