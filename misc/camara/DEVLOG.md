@@ -61,6 +61,7 @@ presenting: [demo/POC-RUNBOOK.md](demo/POC-RUNBOOK.md) · conformance: [CONFORMA
    nrUE PDU Session Modification + UL QoS-flow matching merged in PR #432 (2026-10-09). Open: PR #831 (E1AP DRBs on modify,
    only matters for a split CU-CP/CU-UP setup; use a monolithic gNB) and PR #1131 (nrUE initial QoS rules). Not yet tested with
    Open5GS here; check that it builds/performs on the target host's architecture. Spike: ~0.5–1 d.
+   Setup prompt for a Claude session on VM2: `lab/OAI-VM2-SETUP-PROMPT.md` (OAI UE uses spare SIM 999700000000002 / +99970000002).
 2. **srsRAN Project gNB + srsUE over ZMQ**: needs `qos.yml` entries for the 5QIs used (3 and 4). Modify support with srsUE
    is not confirmed. Fallback.
 3. **OMEC gnbsim**: PDU session modification merged Sep 2026 (PR #520); generates UL user-plane traffic; validated on
