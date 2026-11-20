@@ -25,3 +25,17 @@ call() {
         -H "x-correlator: demo-$(date +%s%N)" ${body:+-H 'content-type: application/json' -d "$body"} \
         -w '\n◀ HTTP %{http_code}\n' | { read -r -d '' out || true; echo "$out" | sed '$d' | jq . 2>/dev/null || echo "$out" | sed '$d'; echo "$out" | tail -1; }
 }
+
+# ── presentation helpers (story scripts) ─────────────────────────────────────
+# PAUSE=1 (default in story scripts) waits for Enter before each step.
+step() { echo; printf '\033[1m━━ %s\033[0m\n' "$*"; if [[ ${PAUSE:-1} == 1 ]]; then read -r -p "   [Enter] " _ </dev/tty; fi; }
+note() { printf '   \033[2m%s\033[0m\n' "$*"; }
+fact() { printf '   \033[36m▸ %s\033[0m\n' "$*"; }
+# post_json PATH JSON  -> prints request/response like call(), and stores the body in $LAST
+post_json() {
+  echo "▶ POST $1 $2" >&2
+  LAST=$(curl -sS -X POST "$CAMARA_URL$1" -H "Authorization: Bearer ${TOKEN:-}" -H "x-correlator: demo-$(date +%s%N)" \
+         -H 'content-type: application/json' -d "$2" -w '\n%{http_code}')
+  LAST_CODE=$(tail -1 <<<"$LAST"); LAST=$(sed '$d' <<<"$LAST")
+  jq . <<<"$LAST" 2>/dev/null || echo "$LAST"; echo "◀ HTTP $LAST_CODE"
+}

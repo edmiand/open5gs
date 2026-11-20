@@ -12,13 +12,14 @@ This is a reviewed mapping, not an automated run of the Gherkin steps. The expec
 |---|---:|---:|---:|---:|---:|
 | ApplicationProfiles@r2.3 | 22 | 22 | 0 | 0 | 0 |
 | ConnectivityInsights@r4.3 | 18 | 17 | 1 | 0 | 0 |
+| DeviceIdentifier@r3.5 | 110 | 110 | 0 | 0 | 0 |
 | DeviceRoamingStatus@r2.3 | 80 | 76 | 3 | 0 | 1 |
 | DeviceSwap@r4.3 | 37 | 35 | 2 | 0 | 0 |
 | NumberVerification@r4.2 | 23 | 23 | 0 | 0 | 0 |
 | QoSProfiles@r1.2 | 31 | 28 | 3 | 0 | 0 |
 | QualityOnDemand@r4.3 | 96 | 95 | 1 | 0 | 0 |
 | SimSwap@r4.3 | 83 | 77 | 5 | 0 | 1 |
-| **Total** | **390** | **373** | **15** | **0** | **2** |
+| **Total** | **500** | **483** | **15** | **0** | **2** |
 
 ## Lab-wide deviations
 
@@ -77,6 +78,121 @@ This is a reviewed mapping, not an automated run of the Gherkin steps. The expec
 | ✅ | `connectivity_insights_19_service_not_applicable` Service not available for the device | 422 SERVICE_NOT_APPLICABLE |  |
 | ✅ | `connectivity_insights_20_too_many_requests` Too many requests (rate limit) | 429 TOO_MANY_REQUESTS | Per-client limiter: rate_limit.per_minute → TOO_MANY_REQUESTS, rate_limit.daily_quota → QUOTA_EXCEEDED. |
 | ✅ | `connectivity_insights_21_quota_exceeded` Quota exceeded | 429 QUOTA_EXCEEDED | Per-client limiter: rate_limit.per_minute → TOO_MANY_REQUESTS, rate_limit.daily_quota → QUOTA_EXCEEDED. |
+
+## DeviceIdentifier@r3.5
+
+| | Scenario | Expected | Note |
+|---|---|---|---|
+| ✅ | `DeviceIdentifier_matchIdentifier_200.01_success_scenario_3-legged_token` Match current device identifier for DEVICE1 with SIMCARD1 using 3-legged access token | 200 | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_matchIdentifier_200.02_success_scenario_2-legged_token_identifying_device_by_phone_number` Match current device identifier for DEVICE1 with SIMCARD1 identifying device by phone number | 200 |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_200.02b_success_scenario_2-legged_token_identifying_device_by_phone_number_non_match` Non-match current device identifier for DEVICE1 with SIMCARD1 identifying device by phone number | 200 |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_200.03_success_scenario_2-legged_token_identifying_device_by_IPv4_address` Match current device identifier for DEVICE1 with SIMCARD1 identifying device by IPv4 address | 200 |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_200.03b_success_scenario_2-legged_token_identifying_device_by_IPv4_address_non_match` Non-match current device identifier for DEVICE1 with SIMCARD1 identifying device by IPv4 address | 200 |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_200.04_success_scenario_2-legged_token_identifying_device_by_multiple_identifiers` Match current device identifier for DEVICE1 with SIMCARD1 identifying device by multiple identifiers | 200 |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_200.04b_success_scenario_2-legged_token_identifying_device_by_multiple_identifiers_non_match` Non-match current device identifier for DEVICE1 with SIMCARD1 identifying device by multiple identifiers | 200 |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_200.05_success_scenario_3-legged_token_after_device_swap_mismatch` Non-match for old device identifier after device swap using 3-legged access token | 200 | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_matchIdentifier_200.05b_success_scenario_3-legged_token_after_device_swap_match` Match for new device identifier after device swap using 3-legged access token | 200 | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_matchIdentifier_200.06_success_scenario_2-legged_token_after_SIM_card_swap` Match current device identifier for DEVICE1 with SIMCARD2 using 2-legged access token | 200 |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_400.1_schema_not_compliant` Invalid Argument. Generic Syntax Exception | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_400.2_no_request_body` Missing request body | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_400.2b_device_empty` The device value is an empty object | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_400.3_device_identifiers_not_schema_compliant` Some device identifier value does not comply with the schema | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_400.4_invalid_identifier_type` Unsupported identifier type | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_400.5_invalid_identifier_format` Provided identifier does not comply with the format required by the identifier type | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_401.1_no_authorization_header` No Authorization header | 401 UNAUTHENTICATED |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_401.2_expired_access_token` Expired access token | 401 UNAUTHENTICATED |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_401.3_invalid_access_token` Invalid access token | 401 UNAUTHENTICATED |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_403.1_missing_access_token_scope` Missing access token scope | 403 PERMISSION_DENIED |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_403.2_consent_not_granted` The end user of SIMCARD1 has not granted consent | 403 PERMISSION_DENIED |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_404.1_device_not_found` An identifier cannot be matched to a valid device | 404 IDENTIFIER_NOT_FOUND |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_422.1_device_identifiers_unsupported` None of the provided device identifiers is supported by the implementation | 422 UNSUPPORTED_IDENTIFIER |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_422.2_service_not_applicable` Service not applicable for the identified mobile device subscription | 422 SERVICE_NOT_APPLICABLE |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_422.3_unidentifiable_device` Device not included and cannot be deduced from the access token | 422 MISSING_IDENTIFIER |  |
+| ✅ | `DeviceIdentifier_matchIdentifier_422.4_device_token_mismatch` Explicit device identifier provided when a 3-legged access token identifies a different device | 422 UNNECESSARY_IDENTIFIER | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_matchIdentifier_422.5_unnecessary_device_identifier_in_request` Explicit device identifier provided when a 3-legged access token identifies the same device | 422 UNNECESSARY_IDENTIFIER | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_matchIdentifier_429.01_Too_Many_Requests` Request is rejected due to threshold policy | 429 TOO_MANY_REQUESTS | Per-client limiter: rate_limit.per_minute → TOO_MANY_REQUESTS, rate_limit.daily_quota → QUOTA_EXCEEDED. |
+| ✅ | `DeviceIdentifier_matchIdentifier_429.02_Quota_Exceeded` Request is rejected due to API consumer quota being reached | 429 QUOTA_EXCEEDED | Per-client limiter: rate_limit.per_minute → TOO_MANY_REQUESTS, rate_limit.daily_quota → QUOTA_EXCEEDED. |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_200.01_success_scenario_3-legged_token` Retrieve device identifier for DEVICE1 with SIM card SIMCARD1 using 3-legged access token | 200 | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_200.02_success_scenario_2-legged_token_identifying_device_by_phone_number` Retrieve device identifier for DEVICE1 with SIM card SIMCARD1 identifying device by phone number | 200 |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_200.03_success_scenario_2-legged_token_identifying_device_by_IPv4_address` Retrieve device identifier for DEVICE1 with SIM card SIMCARD1 identifying device by IPv4 address | 200 |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_200.04_success_scenario_3-legged_token_after_SIM_card_swap` Retrieve device identifier for DEVICE1 with SIM card SIMCARD2 using 3-legged access token | 200 | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_200.05_success_scenario_2-legged_token_after_SIM_card_swap` Retrieve device identifier for DEVICE1 with SIM card SIMCARD2 using 2-legged access token | 200 |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_200.06_success_scenario_3-legged_token_after_device_swap` Retrieve device identifier for DEVICE2 with SIM card SIMCARD1 using 3-legged access token | 200 | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_200.07_success_scenario_2-legged_token_after_device_swap` Retrieve device identifier for DEVICE2 with SIM card SIMCARD1 using 2-legged access token | 200 |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_200.08_success_scenario_2-legged_token_identifying_device_by_multiple_matching_identifiers` Retrieve device identifier for DEVICE1 with SIM card SIMCARD1 identifying device by multiple matching identifiers | 200 |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_200.09_success_scenario_2-legged_token_identifying_device_by_multiple_conflicting_identifiers` Retrieve device identifier for DEVICE1 with SIM card SIMCARD1 identifying device by multiple conflicting identifiers | 200 |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_400.1_schema_not_compliant` Invalid Argument. Generic Syntax Exception | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_400.2_no_request_body` Missing request body | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_400.3_device_empty` The device value is an empty object | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_400.4_device_identifiers_not_schema_compliant` Some device identifier value does not comply with the schema | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_400.5_out_of_range_port` Out of range port | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_401.1_no_authorization_header` No Authorization header | 401 UNAUTHENTICATED |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_401.2_expired_access_token` Expired access token | 401 UNAUTHENTICATED |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_401.3_invalid_access_token` Invalid access token | 401 UNAUTHENTICATED |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_403.1_missing_access_token_scope` Missing access token scope | 403 PERMISSION_DENIED |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_403.2_consent_not_granted` The end user of SIMCARD1 has not granted consent | 403 PERMISSION_DENIED |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_404.1_device_not_found` An identifier cannot be matched to a valid device | 404 IDENTIFIER_NOT_FOUND |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_422.1_device_identifiers_unsupported` None of the provided device identifiers is supported by the implementation | 422 UNSUPPORTED_IDENTIFIER |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_422.2_device_not_supported` Service not available for the device | 422 SERVICE_NOT_APPLICABLE |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_422.3_unidentifiable_device` Device not included and cannot be deduced from the access token | 422 MISSING_IDENTIFIER |  |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_422.4_device_token_mismatch` Explicit device identifier provided when a 3-legged access token identifies a different device | 422 UNNECESSARY_IDENTIFIER | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_422.5_unnecessary_device_identifier_in_request` Explicit device identifier provided when a 3-legged access token identifies the same device | 422 UNNECESSARY_IDENTIFIER | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_429.01_Too_Many_Requests` Request is rejected due to threshold policy | 429 TOO_MANY_REQUESTS | Per-client limiter: rate_limit.per_minute → TOO_MANY_REQUESTS, rate_limit.daily_quota → QUOTA_EXCEEDED. |
+| ✅ | `DeviceIdentifier_retrieveIdentifier_429.02_Quota_Exceeded` Request is rejected due to API consumer quota being reached | 429 QUOTA_EXCEEDED | Per-client limiter: rate_limit.per_minute → TOO_MANY_REQUESTS, rate_limit.daily_quota → QUOTA_EXCEEDED. |
+| ✅ | `DeviceIdentifier_retrievePpid_200.01_success_scenario_3-legged_token` Retrieve device PPID for DEVICE1 with SIM card SIMCARD1 using 3-legged access token | 200 | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_retrievePpid_200.02_success_scenario_2-legged_token_identifying_device_by_phone_number` Retrieve device PPID for DEVICE1 with SIM card SIMCARD1 identifying device by phone number | 200 |  |
+| ✅ | `DeviceIdentifier_retrievePpid_200.03_success_scenario_2-legged_token_identifying_device_by_IPv4_address` Retrieve device PPID for DEVICE1 with SIM card SIMCARD1 identifying device by IPv4 address | 200 |  |
+| ✅ | `DeviceIdentifier_retrievePpid_200.04_success_scenario_3-legged_token_after_SIM_card_swap` Retrieve device PPID for DEVICE1 with SIM card SIMCARD2 using 3-legged access token | 200 | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_retrievePpid_200.05_success_scenario_2-legged_token_after_SIM_card_swap` Retrieve device PPID for DEVICE1 with SIM card SIMCARD2 using 2-legged access token | 200 |  |
+| ✅ | `DeviceIdentifier_retrievePpid_200.06_success_scenario_3-legged_token_after_device_swap` Retrieve device PPID for DEVICE2 with SIM card SIMCARD1 using 3-legged access token | 200 | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_retrievePpid_200.07_success_scenario_2-legged_token_after_device_swap` Retrieve device PPID for DEVICE2 with SIM card SIMCARD1 using 2-legged access token | 200 |  |
+| ✅ | `DeviceIdentifier_retrievePpid_200.08_success_scenario_2-legged_token_identifying_device_by_multiple_matching_identifiers` Retrieve device PPID for DEVICE1 with SIM card SIMCARD1 identifying device by multiple matching identifiers | 200 |  |
+| ✅ | `DeviceIdentifier_retrievePpid_200.09_success_scenario_2-legged_token_identifying_device_by_multiple_conflicting_identifiers` Retrieve device PPID for DEVICE1 with SIM card SIMCARD1 identifying device by multiple conflicting identifiers | 200 |  |
+| ✅ | `DeviceIdentifier_retrievePpid_400.1_schema_not_compliant` Invalid Argument. Generic Syntax Exception | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_retrievePpid_400.2_no_request_body` Missing request body | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_retrievePpid_400.3_device_empty` The device value is an empty object | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_retrievePpid_400.4_device_identifiers_not_schema_compliant` Some device identifier value does not comply with the schema | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_retrievePpid_400.5_out_of_range_port` Out of range port | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_retrievePpid_401.1_no_authorization_header` No Authorization header | 401 UNAUTHENTICATED |  |
+| ✅ | `DeviceIdentifier_retrievePpid_401.2_expired_access_token` Expired access token | 401 UNAUTHENTICATED |  |
+| ✅ | `DeviceIdentifier_retrievePpid_401.3_invalid_access_token` Invalid access token | 401 UNAUTHENTICATED |  |
+| ✅ | `DeviceIdentifier_retrievePpid_403.1_missing_access_token_scope` Missing access token scope | 403 PERMISSION_DENIED |  |
+| ✅ | `DeviceIdentifier_retrievePpid_403.2_consent_not_granted` The end user of SIMCARD1 has not granted consent | 403 PERMISSION_DENIED |  |
+| ✅ | `DeviceIdentifier_retrievePpid_404.1_device_not_found` An identifier cannot be matched to a valid device | 404 IDENTIFIER_NOT_FOUND |  |
+| ✅ | `DeviceIdentifier_retrievePpid_422.1_unsupported_device_identifier` A 2-legged access token is used, but none of the provided device identifiers is supported by the implementation | 422 UNSUPPORTED_IDENTIFIER |  |
+| ✅ | `DeviceIdentifier_retrievePpid_422.2_device_not_supported` Service not available for the device | 422 SERVICE_NOT_APPLICABLE |  |
+| ✅ | `DeviceIdentifier_retrievePpid_422.3_unidentifiable_device` Device identifier not included and cannot be deduced from the access token | 422 MISSING_IDENTIFIER |  |
+| ✅ | `DeviceIdentifier_retrievePpid_422.4_device_token_mismatch` Explicit device identifier provided when a 3-legged access token identifies a different device | 422 UNNECESSARY_IDENTIFIER | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_retrievePpid_422.5_unnecessary_device_identifier_in_request` Explicit device identifier provided when a 3-legged access token identifies the same device | 422 UNNECESSARY_IDENTIFIER | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_retrievePpid_429.01_Too_Many_Requests` Request is rejected due to threshold policy | 429 TOO_MANY_REQUESTS | Per-client limiter: rate_limit.per_minute → TOO_MANY_REQUESTS, rate_limit.daily_quota → QUOTA_EXCEEDED. |
+| ✅ | `DeviceIdentifier_retrievePpid_429.02_Quota_Exceeded` Request is rejected due to API consumer quota being reached | 429 QUOTA_EXCEEDED | Per-client limiter: rate_limit.per_minute → TOO_MANY_REQUESTS, rate_limit.daily_quota → QUOTA_EXCEEDED. |
+| ✅ | `DeviceIdentifier_retrieveType_200.01_success_scenario_3-legged_token` Retrieve device type for DEVICE1 with SIM card SIMCARD1 using 3-legged access token | 200 | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_retrieveType_200.02_success_scenario_2-legged_token_identifying_device_by_phone_number` Retrieve device type for DEVICE1 with SIM card SIMCARD1 identifying device by phone number | 200 |  |
+| ✅ | `DeviceIdentifier_retrieveType_200.03_success_scenario_2-legged_token_identifying_device_by_IPv4_address` Retrieve device type for DEVICE1 with SIM card SIMCARD1 identifying device by IPv4 address | 200 |  |
+| ✅ | `DeviceIdentifier_retrieveType_200.04_success_scenario_3-legged_token_after_SIM_card_swap` Retrieve device type for DEVICE1 with SIM card SIMCARD2 using 3-legged access token | 200 | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_retrieveType_200.05_success_scenario_2-legged_token_after_SIM_card_swap` Retrieve device type for DEVICE1 with SIM card SIMCARD2 using 2-legged access token | 200 |  |
+| ✅ | `DeviceIdentifier_retrieveType_200.06_success_scenario_3-legged_token_after_device_swap` Retrieve device type for DEVICE2 with SIM card SIMCARD1 using 3-legged access token | 200 | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_retrieveType_200.07_success_scenario_2-legged_token_after_device_swap` Retrieve device type for DEVICE2 with SIM card SIMCARD1 using 2-legged access token | 200 |  |
+| ✅ | `DeviceIdentifier_retrieveType_200.08_success_scenario_2-legged_token_identifying_device_by_multiple_matching_identifiers` Retrieve device type for DEVICE1 with SIM card SIMCARD1 identifying device by multiple matching identifiers | 200 |  |
+| ✅ | `DeviceIdentifier_retrieveType_200.09_success_scenario_2-legged_token_identifying_device_by_multiple_conflicting_identifiers` Retrieve device type for DEVICE1 with SIM card SIMCARD1 identifying device by multiple conflicting identifiers | 200 |  |
+| ✅ | `DeviceIdentifier_retrieveType_400.1_schema_not_compliant` Invalid Argument. Generic Syntax Exception | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_retrieveType_400.2_no_request_body` Missing request body | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_retrieveType_400.3_device_empty` The device value is an empty object | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_retrieveType_400.4_device_identifiers_not_schema_compliant` Some device identifier value does not comply with the schema | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_retrieveType_400.5_out_of_range_port` Out of range port | 400 INVALID_ARGUMENT |  |
+| ✅ | `DeviceIdentifier_retrieveType_401.1_no_authorization_header` No Authorization header | 401 UNAUTHENTICATED |  |
+| ✅ | `DeviceIdentifier_retrieveType_401.2_expired_access_token` Expired access token | 401 UNAUTHENTICATED |  |
+| ✅ | `DeviceIdentifier_retrieveType_401.3_invalid_access_token` Invalid access token | 401 UNAUTHENTICATED |  |
+| ✅ | `DeviceIdentifier_retrieveType_403.1_missing_access_token_scope` Missing access token scope | 403 PERMISSION_DENIED |  |
+| ✅ | `DeviceIdentifier_retrieveType_403.2_consent_not_granted` The end user of SIMCARD1 has not granted consent | 403 PERMISSION_DENIED |  |
+| ✅ | `DeviceIdentifier_retrieveType_404.1_device_not_found` An identifier cannot be matched to a valid device | 404 IDENTIFIER_NOT_FOUND |  |
+| ✅ | `DeviceIdentifier_retrieveType_422.1_device_identifiers_unsupported` None of the provided device identifiers is supported by the implementation | 422 UNSUPPORTED_IDENTIFIER |  |
+| ✅ | `DeviceIdentifier_retrieveType_422.2_device_not_supported` Service not available for the device | 422 SERVICE_NOT_APPLICABLE |  |
+| ✅ | `DeviceIdentifier_retrieveType_422.3_unidentifiable_device` Device not included and cannot be deduced from the access token | 422 MISSING_IDENTIFIER |  |
+| ✅ | `DeviceIdentifier_retrieveType_422.4_device_token_mismatch` Explicit device identifier provided when a 3-legged access token identifies a different device | 422 UNNECESSARY_IDENTIFIER | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_retrieveType_422.5_unnecessary_device_identifier_in_request` Explicit device identifier provided when a 3-legged access token identifies the same device | 422 UNNECESSARY_IDENTIFIER | 3-legged tokens come from the network-based /oauth2/authorize flow. |
+| ✅ | `DeviceIdentifier_retrieveType_429.01_Too_Many_Requests` Request is rejected due to threshold policy | 429 TOO_MANY_REQUESTS | Per-client limiter: rate_limit.per_minute → TOO_MANY_REQUESTS, rate_limit.daily_quota → QUOTA_EXCEEDED. |
+| ✅ | `DeviceIdentifier_retrieveType_429.02_Quota_Exceeded` Request is rejected due to API consumer quota being reached | 429 QUOTA_EXCEEDED | Per-client limiter: rate_limit.per_minute → TOO_MANY_REQUESTS, rate_limit.daily_quota → QUOTA_EXCEEDED. |
 
 ## DeviceRoamingStatus@r2.3
 

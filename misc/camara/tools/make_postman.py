@@ -50,85 +50,93 @@ def token(scopes):
                save=[("accessToken", ".access_token")])
 
 
+NV_AUTH = req("Authorize — RUN FROM THE DEVICE (curl --interface uesimtun0)", "GET", "/oauth2/authorize", auth="none",
+              query=[("response_type", "code"), ("client_id", "{{clientId}}"),
+                     ("redirect_uri", "https://demo-app.example/callback"),
+                     ("scope", "openid number-verification:verify"), ("state", "pm")],
+              desc="Must reach the gateway over the device's mobile data path (http://10.45.0.1:8090). From Postman "
+                   "(off-network) it returns error=access_denied — the 'cloned agent' case. Copy `code` from the "
+                   "device's redirect into the collection variable authCode (valid 60 s).")
+B_DI = "device-identifier"
+
 folders = [
-    ("0 · Foundations", [
+    ("0 · Setup", [
         req("Health", "GET", "/health", auth="none"),
         req("OIDC discovery", "GET", "/.well-known/openid-configuration", auth="none"),
-        token("lab:read lab:write"),
-        req("Resolve device (lab)", "POST", "/_lab/resolve", {"device": DEV}),
     ]),
-    ("1 · QoS Profiles + Quality on Demand", [
-        token("qos-profiles:read quality-on-demand:sessions:create quality-on-demand:sessions:read "
-              "quality-on-demand:sessions:update quality-on-demand:sessions:delete "
-              "quality-on-demand:sessions:retrieve-by-device"),
-        req("Retrieve QoS profiles", "POST", "/qos-profiles/v1/retrieve-qos-profiles", {"status": "ACTIVE"}),
-        req("Get QoS profile QOS_E", "GET", "/qos-profiles/v1/qos-profiles/QOS_E"),
-        req("Create QoD session", "POST", "/quality-on-demand/v1/sessions",
-            {"device": DEV, "applicationServer": {"ipv4Address": "{{appServer}}"}, "qosProfile": "QOS_E",
-             "duration": 120, "sink": "{{sink}}"}, save=[("sessionId", ".sessionId")]),
-        req("Get QoD session", "GET", "/quality-on-demand/v1/sessions/{{sessionId}}"),
-        req("Extend QoD session", "POST", "/quality-on-demand/v1/sessions/{{sessionId}}/extend",
-            {"requestedAdditionalDuration": 60}),
-        req("Retrieve sessions by device", "POST", "/quality-on-demand/v1/retrieve-sessions", {"device": DEV}),
-        req("Delete QoD session", "DELETE", "/quality-on-demand/v1/sessions/{{sessionId}}"),
-    ]),
-    ("2 · SIM Swap + Device Swap + subscriptions", [
-        token(f"sim-swap:retrieve-date sim-swap:check device-swap:retrieve-date device-swap:check "
-              f"sim-swap-subscriptions:{B_SS}.swapped:create sim-swap-subscriptions:read sim-swap-subscriptions:delete"),
-        req("SIM swap — retrieve date", "POST", "/sim-swap/v2/retrieve-date", {"phoneNumber": "{{phone}}"}),
-        req("SIM swap — check (24 h)", "POST", "/sim-swap/v2/check", {"phoneNumber": "{{phone}}", "maxAge": 24}),
-        req("Device swap — retrieve date", "POST", "/device-swap/v1/retrieve-date", {"phoneNumber": "{{phone}}"}),
-        req("Device swap — check (24 h)", "POST", "/device-swap/v1/check", {"phoneNumber": "{{phone}}", "maxAge": 24}),
-        req("Subscribe: SIM swapped", "POST", "/sim-swap-subscriptions/v0.4/subscriptions",
-            {"protocol": "HTTP", "sink": "{{sink}}", "types": [f"{B_SS}.swapped"],
-             "config": {"subscriptionDetail": {"phoneNumber": "{{phone}}"}}},
-            save=[("simSwapSubscriptionId", ".id")],
-            desc="Then move the MSISDN: tools/lab_swap.py move-msisdn <msisdn> --to <imsi>"),
-        req("List SIM swap subscriptions", "GET", "/sim-swap-subscriptions/v0.4/subscriptions"),
-        req("Delete SIM swap subscription", "DELETE", "/sim-swap-subscriptions/v0.4/subscriptions/{{simSwapSubscriptionId}}"),
-    ]),
-    ("3 · Number Verification (3-legged)", [
-        req("Authorize — RUN FROM THE UE (curl --interface uesimtun0)", "GET", "/oauth2/authorize", auth="none",
-            query=[("response_type", "code"), ("client_id", "{{clientId}}"),
-                   ("redirect_uri", "https://demo-app.example/callback"),
-                   ("scope", "openid number-verification:verify"), ("state", "pm")],
-            desc="Must reach the gateway over the UE data path (http://10.45.0.1:8090). From Postman (off-network) this "
-                 "returns error=access_denied — the expected negative case. Copy `code` from the device's redirect into "
-                 "the collection variable authCode."),
-        req("Exchange code → single-use token", "POST", "/oauth2/token", auth="basic",
+    ("Story 1 · Identity — the cloned agent can't act", [
+        NV_AUTH,
+        req("1 · Exchange code → single-use token (sub = SIM)", "POST", "/oauth2/token", auth="basic",
             form=[("grant_type", "authorization_code"), ("code", "{{authCode}}"),
                   ("redirect_uri", "https://demo-app.example/callback")],
             save=[("accessToken", ".access_token")]),
-        req("Verify phone number", "POST", "/number-verification/v2/verify", {"phoneNumber": "{{phone}}"}),
+        req("1 · Number Verification — is this the registered MSISDN?", "POST", "/number-verification/v2/verify",
+            {"phoneNumber": "{{phone}}"}),
+        token(f"{B_DI}:match-identifier {B_DI}:retrieve-identifier {B_DI}:retrieve-type {B_DI}:retrieve-ppid "
+              "device-swap:check device-swap:retrieve-date"),
+        req("2 · Device Identifier — match registered IMEI", "POST", "/device-identifier/v0.4/match-identifier",
+            {"device": DEV, "imei": "{{registeredImei}}"}),
+        req("2 · Device Identifier — retrieve identifier", "POST", "/device-identifier/v0.4/retrieve-identifier", {"device": DEV}),
+        req("2 · Device Identifier — retrieve type", "POST", "/device-identifier/v0.4/retrieve-type", {"device": DEV}),
+        req("2 · Device Identifier — retrieve PPID", "POST", "/device-identifier/v0.4/retrieve-ppid", {"device": DEV}),
+        req("3 · Device Swap — check (24 h)", "POST", "/device-swap/v1/check", {"phoneNumber": "{{phone}}", "maxAge": 24}),
+        req("3 · Device Swap — retrieve date", "POST", "/device-swap/v1/retrieve-date", {"phoneNumber": "{{phone}}"}),
     ]),
-    ("4 · Device Roaming Status + subscriptions", [
+    ("Story 2 · Location — approved country?", [
         token(f"device-roaming-status:read lab:write device-roaming-status-subscriptions:read "
               f"device-roaming-status-subscriptions:delete "
               + " ".join(f"device-roaming-status-subscriptions:{B_RS}.{e}:create"
                          for e in ("roaming-status", "roaming-on", "roaming-off", "roaming-change-country"))),
-        req("Retrieve roaming status", "POST", "/device-roaming-status/v1/retrieve", {"device": DEV}),
+        req("Roaming status now", "POST", "/device-roaming-status/v1/retrieve", {"device": DEV}),
+        req("Subscribe: roaming-change-country", "POST", "/device-roaming-status-subscriptions/v0.9/subscriptions",
+            {"protocol": "HTTP", "sink": "{{sink}}", "types": [f"{B_RS}.roaming-change-country"],
+             "config": {"subscriptionDetail": {"device": DEV}}}, save=[("roamingSubscriptionId", ".id")]),
         req("Subscribe: roaming-on", "POST", "/device-roaming-status-subscriptions/v0.9/subscriptions",
             {"protocol": "HTTP", "sink": "{{sink}}", "types": [f"{B_RS}.roaming-on"],
-             "config": {"subscriptionDetail": {"device": DEV}}}, save=[("roamingSubscriptionId", ".id")]),
-        req("LAB: travel to France (208/01)", "POST", "/_lab/roaming-override", {"device": DEV, "servingPlmn": "20801"}),
+             "config": {"subscriptionDetail": {"device": DEV}}}, save=[("roamingOnSubscriptionId", ".id")]),
+        req("LAB: travel to approved country (DE 262/01)", "POST", "/_lab/roaming-override", {"device": DEV, "servingPlmn": "26201"}),
+        req("Roaming status (approved)", "POST", "/device-roaming-status/v1/retrieve", {"device": DEV}),
+        req("LAB: travel to non-approved country (US 310/260)", "POST", "/_lab/roaming-override", {"device": DEV, "servingPlmn": "310260"}),
+        req("Roaming status (non-approved)", "POST", "/device-roaming-status/v1/retrieve", {"device": DEV}),
         req("LAB: back home", "POST", "/_lab/roaming-override", {"device": DEV, "servingPlmn": None}),
         req("List roaming subscriptions", "GET", "/device-roaming-status-subscriptions/v0.9/subscriptions"),
-        req("Delete roaming subscription", "DELETE",
+        req("Delete change-country subscription", "DELETE",
             "/device-roaming-status-subscriptions/v0.9/subscriptions/{{roamingSubscriptionId}}"),
+        req("Delete roaming-on subscription", "DELETE",
+            "/device-roaming-status-subscriptions/v0.9/subscriptions/{{roamingOnSubscriptionId}}"),
     ]),
-    ("5 · Application Profiles + Connectivity Insights", [
-        token("application-profiles:create application-profiles:read application-profiles:update "
+    ("Story 3 · Quality — priority only when needed", [
+        token("qos-profiles:read quality-on-demand:sessions:create quality-on-demand:sessions:read "
+              "quality-on-demand:sessions:update quality-on-demand:sessions:delete "
+              "quality-on-demand:sessions:retrieve-by-device application-profiles:create application-profiles:read "
               "application-profiles:delete connectivity-insights:check lab:read"),
-        req("Create application profile (cloud gaming)", "POST", "/application-profiles/v0.6/application-profiles",
-            {"networkQualityThresholds": {"packetDelayBudget": {"value": 10, "unit": "Milliseconds"},
-                                          "jitter": {"value": 5, "unit": "Milliseconds"}, "packetLossErrorRate": 2}},
+        req("QoS profiles offered", "POST", "/qos-profiles/v1/retrieve-qos-profiles", {"status": "ACTIVE"}),
+        req("(optional) Create live-video application profile", "POST", "/application-profiles/v0.6/application-profiles",
+            {"networkQualityThresholds": {"packetDelayBudget": {"value": 100, "unit": "Milliseconds"},
+                                          "jitter": {"value": 30, "unit": "Milliseconds"}, "packetLossErrorRate": 2}},
             save=[("profileId", ".applicationProfileId")]),
-        req("Get application profile", "GET", "/application-profiles/v0.6/application-profiles/{{profileId}}"),
-        req("Check network quality", "POST", "/connectivity-insights/v0.7/check-network-quality",
-            {"applicationProfileId": "{{profileId}}", "device": DEV,
-             "applicationServer": {"ipv4Address": "{{appServer}}"}}),
-        req("LAB: last measurement", "GET", "/_lab/connectivity-insights/last"),
-        req("Delete application profile", "DELETE", "/application-profiles/v0.6/application-profiles/{{profileId}}"),
+        req("(optional) Connectivity Insights — can the network meet it?", "POST", "/connectivity-insights/v0.7/check-network-quality",
+            {"applicationProfileId": "{{profileId}}", "device": DEV, "applicationServer": {"ipv4Address": "{{appServer}}"}}),
+        req("(optional) LAB: raw measurement", "GET", "/_lab/connectivity-insights/last"),
+        req("Video tool opened → QoD session QOS_M, 30 min", "POST", "/quality-on-demand/v1/sessions",
+            {"device": DEV, "applicationServer": {"ipv4Address": "{{appServer}}"}, "qosProfile": "QOS_M",
+             "duration": 1800, "sink": "{{sink}}"}, save=[("sessionId", ".sessionId")],
+            desc="⚠ With UERANSIM the gNB drops N2 when the QoS flow reaches the radio. Run this last."),
+        req("Session status (expect AVAILABLE)", "GET", "/quality-on-demand/v1/sessions/{{sessionId}}"),
+        req("Sessions of the device", "POST", "/quality-on-demand/v1/retrieve-sessions", {"device": DEV}),
+        req("Video tool closed → release priority", "DELETE", "/quality-on-demand/v1/sessions/{{sessionId}}"),
+        req("(optional) Delete application profile", "DELETE", "/application-profiles/v0.6/application-profiles/{{profileId}}"),
+    ]),
+    ("Extras · SIM Swap + lab helpers", [
+        token(f"sim-swap:retrieve-date sim-swap:check sim-swap-subscriptions:{B_SS}.swapped:create "
+              "sim-swap-subscriptions:read sim-swap-subscriptions:delete lab:read"),
+        req("Resolve device (lab)", "POST", "/_lab/resolve", {"device": DEV}),
+        req("SIM swap — check (24 h)", "POST", "/sim-swap/v2/check", {"phoneNumber": "{{phone}}", "maxAge": 24}),
+        req("SIM swap — retrieve date", "POST", "/sim-swap/v2/retrieve-date", {"phoneNumber": "{{phone}}"}),
+        req("Subscribe: SIM swapped", "POST", "/sim-swap-subscriptions/v0.4/subscriptions",
+            {"protocol": "HTTP", "sink": "{{sink}}", "types": [f"{B_SS}.swapped"],
+             "config": {"subscriptionDetail": {"phoneNumber": "{{phone}}"}}}, save=[("simSwapSubscriptionId", ".id")]),
+        req("Delete SIM swap subscription", "DELETE", "/sim-swap-subscriptions/v0.4/subscriptions/{{simSwapSubscriptionId}}"),
     ]),
 ]
 
@@ -140,9 +148,9 @@ coll = {
     "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{accessToken}}", "type": "string"}]},
     "variable": [{"key": k, "value": v} for k, v in [
         ("baseUrl", "http://192.168.64.2:8090"), ("clientId", "demo-app"), ("clientSecret", "<from config.yaml>"),
-        ("phone", "+99970000001"), ("appServer", "198.51.100.10"), ("sink", "http://192.168.64.2:9099/events"),
+        ("phone", "+99970000001"), ("registeredImei", "437081612581614"), ("appServer", "198.51.100.10"), ("sink", "http://192.168.64.2:9099/events"),
         ("accessToken", ""), ("authCode", ""), ("sessionId", ""), ("profileId", ""),
-        ("simSwapSubscriptionId", ""), ("roamingSubscriptionId", "")]],
+        ("simSwapSubscriptionId", ""), ("roamingSubscriptionId", ""), ("roamingOnSubscriptionId", "")]],
     "item": [{"name": n, "item": items} for n, items in folders],
 }
 with open(OUT, "w") as f:

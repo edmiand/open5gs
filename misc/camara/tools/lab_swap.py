@@ -9,6 +9,9 @@
   lab_swap.py set-imeisv 999700000000001 3528820000000101
         Device swap shortcut: overwrite the stored IMEISV. The real path is changing `imeiSv` in the
         UERANSIM UE config and re-registering; the UDR rewrites `imeisv` on every registration.
+  lab_swap.py reset-history [--msisdn 99970000001]
+        Forget recorded SIM/device swaps (e.g. left over from demo runs) and restart monitoring now.
+        Gateway state only (camara_events / camara_snapshots); subscribers are not touched.
 
 Writes Open5GS `subscribers` — lab use only. Fails loudly.
 """
@@ -39,6 +42,7 @@ def main() -> None:
     a = sp.add_parser("add-spare"); a.add_argument("--from", dest="src", required=True); a.add_argument("--imsi", required=True)
     m = sp.add_parser("move-msisdn"); m.add_argument("msisdn"); m.add_argument("--to", required=True)
     d = sp.add_parser("set-imeisv"); d.add_argument("imsi"); d.add_argument("imeisv")
+    r = sp.add_parser("reset-history"); r.add_argument("--msisdn")
     args = ap.parse_args()
 
     col = MongoClient(args.mongo, serverSelectionTimeoutMS=3000)[args.db]["subscribers"]
@@ -80,6 +84,16 @@ def main() -> None:
             col.update_one({"_id": holders[0]["_id"]}, {"$pull": {"msisdn": args.msisdn}})
         col.update_one({"imsi": args.to}, {"$addToSet": {"msisdn": args.msisdn}})
         print(f"moved {args.msisdn}: {holders[0]['imsi'] if holders else '(unassigned)'} -> {args.to}")
+        return
+
+    if args.cmd == "reset-history":
+        db = col.database
+        q = {"msisdn": args.msisdn} if args.msisdn else {}
+        n = db["camara_events"].delete_many(q).deleted_count
+        if not args.msisdn:
+            db["camara_snapshots"].delete_one({"_id": "subscribers-swap"})   # poller re-baselines on next pass
+        print(f"removed {n} swap event(s){' for ' + args.msisdn if args.msisdn else ''}"
+              f"{'' if args.msisdn else '; monitoring restarts at the next poll'}")
         return
 
     if args.cmd == "set-imeisv":

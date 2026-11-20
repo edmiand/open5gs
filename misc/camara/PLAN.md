@@ -2,6 +2,41 @@
 
 Status: **draft / planning** · Created 2026-11-19 · Target lab: edmiand fork, arm64 Ubuntu 22.04
 
+## 0. Why — the user stories (added 2026-11-20)
+
+EQTY Lab provides trust and governance for AI agents: a verifiable identity per agent, rules about what it may
+do (tools, data, models, actions), and a signed, tamper-evident record of every decision. The mobile network knows
+facts no app or AI vendor can fake: which SIM and device a request really comes from, whether a line is roaming
+and where, and whether a connection has priority. CAMARA exposes these facts as REST APIs.
+
+An EQTY gateway (not part of this build) sits between agents and their tools. Before a sensitive action it calls
+CAMARA, decides allow/block, and adds the answers to the agent's signed chain of trust. Nothing EQTY-specific
+runs on the device. **This build is the carrier side:** a lab 5GC whose CAMARA endpoint behaves like a real
+carrier's, scriptable with curl and needing no EQTY component.
+
+| Story | Question the network answers | APIs (versions served) |
+|---|---|---|
+| 1 Identity: "the cloned agent can't act" | Which SIM and which device is this request really from? Does it match the registered MSISDN + IMEI? | Number Verification 2.1.1 · Device Identifier 0.4.0 · Device Swap 1.1.0 |
+| 2 Location: "used from an approved country?" | Is the line roaming, and in which country? Alerts on change. | Device Roaming Status 1.2.0 · Roaming Status Subscriptions 0.9.0 |
+| 3 Quality: "priority only when the tool needs it" | Give the live-video link priority for ≤ 30 min; confirm start and end. | Quality on Demand 1.2.0 · QoS Profiles 1.2.0 · Connectivity Insights 0.7.0 (optional) |
+
+Also served (not in the stories): SIM Swap 2.2.0 + subscriptions 0.4.0 (an optional extra signal for Story 1) and
+Application Profiles 0.6.0 (required by Connectivity Insights).
+
+Decisions (2026-11-20):
+- **Versions:** the story was updated to the latest releases (the build was already on them).
+- **Device Identifier v0.4.0**, including `match-identifier` (the gateway checks the registered IMEI without receiving it).
+- **Story 1 flow B:** 1 redirect through the device. Number Verification (3-legged, proves the SIM on the live data path), then
+  Device Identifier `match-identifier` (2-legged, by the verified MSISDN, registered IMEI), then Device Swap `check`.
+  Wi-Fi/VPN/another carrier → `/authorize` gives `access_denied` → block.
+- **No EQTY mock** for now; the POC is run by hand with curl (see `demo/POC-RUNBOOK.md`).
+- Implemented 2026-11-20 (v0.8.0): Device Identifier v0.4.0 (110/110 test-definition scenarios), story scripts
+  `demo/story{1,2,3}-*.sh`, `demo/preflight.sh`, `demo/POC-RUNBOOK.md`, Postman collection regrouped by story.
+  Rehearsal found and fixed: swap history polluted by demo runs (`lab_swap.py reset-history`); a UE idle after a gNB
+  restart is unreachable (pre-flight now checks the UE answers ping).
+- Deferred: ES256 + JWKS tokens, a gateway audit log, signed responses (the last not recommended: no carrier offers it).
+- Open: the Story 3 RAN (UERANSIM drops N2 on QoS-flow modify; options are srsRAN/OAI gNB or patched UERANSIM).
+
 ## 1. Goal
 
 Demonstrate a set of [CAMARA](https://camaraproject.org) network APIs served on top of

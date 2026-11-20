@@ -67,6 +67,10 @@ auth:
         - "application-profiles:update"
         - "application-profiles:delete"
         - "connectivity-insights:check"
+        - "device-identifier:retrieve-identifier"
+        - "device-identifier:retrieve-type"
+        - "device-identifier:retrieve-ppid"
+        - "device-identifier:match-identifier"
       # authorization-code flow (Number Verification); the demo reads the code from the Location header
       redirect_uris:
         - "https://demo-app.example/callback"

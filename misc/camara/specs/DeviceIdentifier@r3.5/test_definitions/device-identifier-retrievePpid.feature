@@ -1,0 +1,439 @@
+# device-identifier-retrievePpid
+Feature: Camara Mobile Device Identifier API, v0.4.0 - Operation: retrievePpid
+
+  # Input to be provided by the implementation to the tests
+  # References to OAS spec schemas refer to schemas specified in /code/API_definitions/device-identifier.yaml
+  # Implementation indications:
+  # * api_root: API root of the server URL
+  #
+  # Testing assets:
+  # * A mobile device "DEVICE1" with the following parameter values:
+  #         | Parameter           | Value             | Comment                          |
+  #         |---------------------|-------------------|----------------------------------|
+  #         | IMEISV              | IMEISV1           |                                  |
+  #         | IMEI                | IMEI1             |                                  |
+  #         | TAC                 | TAC1              |                                  |
+  #         | Manufacturer        | MANUFACTURER1     |                                  |
+  #         | Model               | MODEL1            |                                  |
+  #         | Public IPv4 Address | PUBLICIPV4ADDRESS |                                  |
+  #         | Public Port         | PUBLICPORT        |                                  |
+  #         | PPID                | PPID1             | API Provider dependent parameter |
+  # * A mobile device "DEVICE2" with the following parameter values:
+  #         | Parameter           | Value             | Comment                          |
+  #         |---------------------|-------------------|----------------------------------|
+  #         | IMEISV              | IMEISV2           |                                  |
+  #         | IMEI                | IMEI2             |                                  |
+  #         | TAC                 | TAC2              |                                  |
+  #         | Manufacturer        | MANUFACTURER2     |                                  |
+  #         | Model               | MODEL2            |                                  |
+  #         | PPID                | PPID2             | API Provider dependent parameter |
+  # * A SIM card "SIMCARD1" from "TELCO1" and phone number "PHONENUMBER1"
+  # * A SIM card "SIMCARD2" from "TELCO2" and phone number "PHONENUMBER2"
+
+  Background: Common Device Identifier retrievePpid setup
+    Given an environment at "apiRoot"
+    And the resource "/device-identifier/v0.4/retrieve-ppid"
+    And the header "Content-Type" is set to "application/json"
+    And the header "Authorization" is set to a valid access token
+    And the header "x-correlator" complies with the OAS schema at "#/components/schemas/XCorrelator"
+    And the request body complies with the OAS schema at "#/components/schemas/RequestBody"
+    And one of the scopes associated with the access token is device-identifier:retrieve-ppid
+
+###################
+# Success scenarios
+###################
+
+  # This scenario is only valid for 3-legged access tokens
+  @DeviceIdentifier_retrievePpid_200.01_success_scenario_3-legged_token
+  Scenario: Retrieve device PPID for DEVICE1 with SIM card SIMCARD1 using 3-legged access token
+    Given SIMCARD1 is installed within DEVICE1, which is connected to the network
+    And the header "Authorization" is set to a valid access token that identifies DEVICE1 containing SIMCARD1
+    And request property "$.device" does not exist
+    When the request "retrievePpid" is sent
+    Then the response status code is 200
+    And the response body complies with the OAS schema at "#/components/schemas/RetrievePpidResponse"
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.ppid" exists and is equal to PPID1
+    And the response property "$.lastChecked" exists and is either a valid date-time in the past, or is null
+
+  # This scenario is only valid for 2-legged access tokens
+  @DeviceIdentifier_retrievePpid_200.02_success_scenario_2-legged_token_identifying_device_by_phone_number
+  Scenario: Retrieve device PPID for DEVICE1 with SIM card SIMCARD1 identifying device by phone number
+    Given SIMCARD1 is installed within DEVICE1, which is connected to the network
+    And the header "Authorization" is set to a valid access token that does not identify a device
+    And request property "$.device.phoneNumber" is set to PHONENUMBER1
+    When the request "retrievePpid" is sent
+    Then the response status code is 200
+    And the response body complies with the OAS schema at "#/components/schemas/RetrievePpidResponse"
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.ppid" exists and is equal to PPID1
+    And the response property "$.lastChecked" exists and is either a valid date-time in the past, or is null
+
+  # This scenario is only valid for 2-legged access tokens
+  @DeviceIdentifier_retrievePpid_200.03_success_scenario_2-legged_token_identifying_device_by_IPv4_address
+  Scenario: Retrieve device PPID for DEVICE1 with SIM card SIMCARD1 identifying device by IPv4 address
+    Given SIMCARD1 is installed within DEVICE1, which is connected to the network
+    And the header "Authorization" is set to a valid access token that does not identify a device
+    And request property "$.device.ipv4Address.publicAddress" is set to PUBLICIPV4ADDRESS
+    And request property "$.device.ipv4Address.publicPort" is set to PUBLICPORT
+    When the request "retrievePpid" is sent
+    Then the response status code is 200
+    And the response body complies with the OAS schema at "#/components/schemas/RetrievePpidResponse"
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.ppid" exists and is equal to PPID1
+    And the response property "$.lastChecked" exists and is either a valid date-time in the past, or is null
+
+  # This scenario is only valid for 3-legged access tokens
+  @DeviceIdentifier_retrievePpid_200.04_success_scenario_3-legged_token_after_SIM_card_swap
+  Scenario: Retrieve device PPID for DEVICE1 with SIM card SIMCARD2 using 3-legged access token
+    Given SIMCARD2 is installed within DEVICE1, which is connected to the network
+    And the header "Authorization" is set to a valid access token that identifies DEVICE1 containing SIMCARD2
+    And request property "$.device" does not exist
+    When the request "retrievePpid" is sent
+    Then the response status code is 200
+    And the response body complies with the OAS schema at "#/components/schemas/RetrievePpidResponse"
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.ppid" exists and is equal to PPID1
+    And the response property "$.lastChecked" exists and is either a valid date-time in the past, or is null
+
+  # This scenario is only valid for 2-legged access tokens
+  @DeviceIdentifier_retrievePpid_200.05_success_scenario_2-legged_token_after_SIM_card_swap
+  Scenario: Retrieve device PPID for DEVICE1 with SIM card SIMCARD2 using 2-legged access token
+    Given SIMCARD2 is installed within DEVICE1, which is connected to the network
+    And the header "Authorization" is set to a valid access token that does not identify a device
+    And request property "$.device.phoneNumber" is set to PHONENUMBER2
+    When the request "retrievePpid" is sent
+    Then the response status code is 200
+    And the response body complies with the OAS schema at "#/components/schemas/RetrievePpidResponse"
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.ppid" exists and is equal to PPID1
+    And the response property "$.lastChecked" exists and is either a valid date-time in the past, or is null
+
+  # This scenario is only valid for 3-legged access tokens
+  @DeviceIdentifier_retrievePpid_200.06_success_scenario_3-legged_token_after_device_swap
+  Scenario: Retrieve device PPID for DEVICE2 with SIM card SIMCARD1 using 3-legged access token
+    Given SIMCARD1 is installed within DEVICE2, which is connected to the network
+    And the header "Authorization" is set to a valid access token that identifies DEVICE2 containing SIMCARD1
+    And request property "$.device" does not exist
+    When the request "retrievePpid" is sent
+    Then the response status code is 200
+    And the response body complies with the OAS schema at "#/components/schemas/RetrievePpidResponse"
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.ppid" exists and is equal to PPID2
+    And the response property "$.lastChecked" exists and is either a valid date-time in the past, or is null
+
+  # This scenario is only valid for 2-legged access tokens
+  @DeviceIdentifier_retrievePpid_200.07_success_scenario_2-legged_token_after_device_swap
+  Scenario: Retrieve device PPID for DEVICE2 with SIM card SIMCARD1 using 2-legged access token
+    Given SIMCARD1 is installed within DEVICE2, which is connected to the network
+    And the header "Authorization" is set to a valid access token that does not identify a device
+    And request property "$.device.phoneNumber" is set to PHONENUMBER1
+    When the request "retrievePpid" is sent
+    Then the response status code is 200
+    And the response body complies with the OAS schema at "#/components/schemas/RetrievePpidResponse"
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.ppid" exists and is equal to PPID2
+    And the response property "$.lastChecked" exists and is either a valid date-time in the past, or is null
+
+  # This scenario is only valid for 2-legged access tokens
+  @DeviceIdentifier_retrievePpid_200.08_success_scenario_2-legged_token_identifying_device_by_multiple_matching_identifiers
+  Scenario: Retrieve device PPID for DEVICE1 with SIM card SIMCARD1 identifying device by multiple matching identifiers
+    Given SIMCARD1 is installed within DEVICE1, which is connected to the network
+    And the header "Authorization" is set to a valid access token that does not identify a device
+    And request property "$.device.phoneNumber" is set to PHONENUMBER1
+    And request property "$.device.ipv4Address.publicAddress" is set to PUBLICIPV4ADDRESS
+    And request property "$.device.ipv4Address.publicPort" is set to PUBLICPORT
+    When the request "retrievePpid" is sent
+    Then the response status code is 200
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response body complies with the OAS schema at "#/components/schemas/RetrievePpidResponse"
+    And the response property "$.ppid" exists and is equal to PPID1
+    And the response property "$.lastChecked" exists and is either a valid date-time in the past, or is null
+    And the response property "$.device" exists and complies with the OAS schema at "#/components/schemas/DeviceResponse"
+
+  # This scenario is only valid for 2-legged access tokens
+  @DeviceIdentifier_retrievePpid_200.09_success_scenario_2-legged_token_identifying_device_by_multiple_conflicting_identifiers
+  Scenario: Retrieve device PPID for DEVICE1 with SIM card SIMCARD1 identifying device by multiple conflicting identifiers
+    Given SIMCARD1 is installed within DEVICE1, which is connected to the network
+    And the header "Authorization" is set to a valid access token that does not identify a device
+    And request property "$.device.phoneNumber" is set to PHONENUMBER2
+    And request property "$.device.ipv4Address.publicAddress" is set to PUBLICIPV4ADDRESS
+    And request property "$.device.ipv4Address.publicPort" is set to PUBLICPORT
+    When the request "retrievePpid" is sent
+    Then the response status code is 200
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response body complies with the OAS schema at "#/components/schemas/RetrievePpidResponse"
+    And the response property "$.ppid" exists and is equal to PPID1 or PPID2
+    And the response property "$.lastChecked" exists and is either a valid date-time in the past, or is null
+    And the response property "$.device" exists and complies with the OAS schema at "#/components/schemas/DeviceResponse"
+
+#################
+# Error code 400
+#################
+
+  # This scenario is valid for both 2-legged and 3-legged access tokens
+  @DeviceIdentifier_retrievePpid_400.1_schema_not_compliant
+  Scenario: Invalid Argument. Generic Syntax Exception
+    Given the request body is set to any value which does not comply with the OAS schema at "#/components/schemas/RequestBody"
+    When the request "retrievePpid" is sent
+    Then the response status code is 400
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 400
+    And the response property "$.code" is "INVALID_ARGUMENT"
+    And the response property "$.message" contains a user friendly text
+
+  # This scenario is valid for both 2-legged and 3-legged access tokens
+  @DeviceIdentifier_retrievePpid_400.2_no_request_body
+  Scenario: Missing request body
+    Given the request body is not included
+    When the request "retrievePpid" is sent
+    Then the response status code is 400
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 400
+    And the response property "$.code" is "INVALID_ARGUMENT"
+    And the response property "$.message" contains a user friendly text
+
+  # This scenario is valid for both 2-legged and 3-legged access tokens
+  @DeviceIdentifier_retrievePpid_400.3_device_empty
+  Scenario: The device value is an empty object
+    Given the request body property "$.device" is set to: {}
+    When the request "retrievePpid" is sent
+    Then the response status code is 400
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 400
+    And the response property "$.code" is "INVALID_ARGUMENT"
+    And the response property "$.message" contains a user friendly text
+
+  # This scenario is valid for both 2-legged and 3-legged access tokens
+  @DeviceIdentifier_retrievePpid_400.4_device_identifiers_not_schema_compliant
+  # Test every type of identifier even if not supported by the implementation
+  # Note that device schema validation errors (if any) should be thrown even if a 3-legged access token is being used
+  Scenario Outline: Some device identifier value does not comply with the schema
+    Given a 2-legged or 3-legged access token is being used
+    And the request body property "<device_identifier>" does not comply with the OAS schema at "<oas_spec_schema>"
+    When the request "retrievePpid" is sent
+    Then the response status code is 400
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 400
+    And the response property "$.code" is "INVALID_ARGUMENT"
+    And the response property "$.message" contains a user friendly text
+
+    Examples:
+      | device_identifier                | oas_spec_schema                             |
+      | $.device.phoneNumber             | #/components/schemas/PhoneNumber             |
+      | $.device.ipv4Address             | #/components/schemas/DeviceIpv4Address       |
+      | $.device.ipv6Address             | #/components/schemas/DeviceIpv6Address       |
+      | $.device.networkAccessIdentifier | #/components/schemas/NetworkAccessIdentifier |
+
+  # This scenario is only valid for 2-legged access tokens
+  # The maximum is considered in the schema, and so is treated as an invalid argument by a generic schema validator without further distinction
+  @DeviceIdentifier_retrievePpid_400.5_out_of_range_port
+  Scenario: Out of range port
+    Given the header "Authorization" is set to a valid access token that does not identify a device
+    And the request body property "$.device.ipv4Address.publicPort" is set to a value less than 1 or greater than 65535
+    When the request "retrievePpid" is sent
+    Then the response status code is 400
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 400
+    And the response property "$.code" is "INVALID_ARGUMENT"
+    And the response property "$.message" contains a user friendly text
+
+#################
+# Error code 401
+#################
+
+  @DeviceIdentifier_retrievePpid_401.1_no_authorization_header
+  Scenario: No Authorization header
+    Given the header "Authorization" is removed
+    When the request "retrievePpid" is sent
+    Then the response status code is 401
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 401
+    And the response property "$.code" is "UNAUTHENTICATED"
+    And the response property "$.message" contains a user friendly text
+
+  # In this case both codes could make sense depending on whether the access token can be refreshed or not
+  @DeviceIdentifier_retrievePpid_401.2_expired_access_token
+  Scenario: Expired access token
+    Given the header "Authorization" is set to an expired access token
+    When the request "retrievePpid" is sent
+    Then the response status code is 401
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 401
+    And the response property "$.code" is "UNAUTHENTICATED"
+    And the response property "$.message" contains a user friendly text
+
+  @DeviceIdentifier_retrievePpid_401.3_invalid_access_token
+  Scenario: Invalid access token
+    Given the header "Authorization" is set to an invalid access token
+    When the request "retrievePpid" is sent
+    Then the response status code is 401
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 401
+    And the response property "$.code" is "UNAUTHENTICATED"
+    And the response property "$.message" contains a user friendly text
+
+#################
+# Error code 403
+#################
+
+  # This scenario is valid for both 2-legged and 3-legged access tokens
+  @DeviceIdentifier_retrievePpid_403.1_missing_access_token_scope
+  Scenario: Missing access token scope
+    Given the header "Authorization" is set to a valid access token that does not include scope device-identifier:retrieve-ppid
+    When the request "retrievePpid" is sent
+    Then the response status code is 403
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 403
+    And the response property "$.code" is "PERMISSION_DENIED"
+    And the response property "$.message" contains a user friendly text
+
+  # This scenario is only valid for 2-legged access tokens
+  @DeviceIdentifier_retrievePpid_403.2_consent_not_granted
+  Scenario: The end user of SIMCARD1 has not granted consent
+    Given the end user of SIMCARD1 has not consented to the API consumer using scope device-identifier:retrieve-ppid for any purpose for that device
+    And SIMCARD1 is installed within DEVICE1, which is connected to the network
+    And the header "Authorization" is set to a valid access token that does not identify a device
+    And request property "$.device.phoneNumber" is set to PHONENUMBER1
+    When the request "retrievePpid" is sent
+    Then the response status code is 403
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 403
+    And the response property "$.code" is "PERMISSION_DENIED"
+    And the response property "$.message" contains a user friendly text
+
+  # Generic 404 errors
+
+  # This scenario is valid only for 2-legged access tokens
+  @DeviceIdentifier_retrievePpid_404.1_device_not_found
+  Scenario: An identifier cannot be matched to a valid device
+    Given the header "Authorization" is set to a valid access token that does not identify a device
+    And the request body property "$.device" is compliant with the OAS schema at "#/components/schemas/Device" but does not identify a valid device
+    When the request "retrievePpid" is sent
+    Then the response status code is 404
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 404
+    And the response property "$.code" is "IDENTIFIER_NOT_FOUND"
+    And the response property "$.message" contains a user friendly text
+
+#################
+# Error code 422
+#################
+
+  # This scenario is only applicable to 2-legged access tokens
+  @DeviceIdentifier_retrievePpid_422.1_unsupported_device_identifier
+  Scenario: A 2-legged access token is used, but none of the provided device identifiers is supported by the implementation
+    Given that some types of device identifiers are not supported by the implementation
+    And the header "Authorization" is set to a valid access token that does not identify a device
+    And the request body property "$.device" exists but only includes device identifiers that are not supported by the implementation
+    When the request "retrievePpid" is sent
+    Then the response status code is 422
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 422
+    And the response property "$.code" is "UNSUPPORTED_IDENTIFIER"
+    And the response property "$.message" contains a user friendly text
+
+  # This scenario is applicable for both 3-legged and 2-legged access tokens
+  @DeviceIdentifier_retrievePpid_422.2_device_not_supported
+  Scenario: Service not available for the device
+    Given that service is not supported for all devices commercialized by the operator
+    And the service is not applicable for the device identified by the token or provided in the request body
+    When the request "retrievePpid" is sent
+    Then the response status code is 422
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 422
+    And the response property "$.code" is "SERVICE_NOT_APPLICABLE"
+    And the response property "$.message" contains a user friendly text
+
+  # This scenario is only applicable to 2-legged access tokens
+  @DeviceIdentifier_retrievePpid_422.3_unidentifiable_device
+  Scenario: Device identifier not included and cannot be deduced from the access token
+    Given the header "Authorization" is set to a valid access token which does not identify a device
+    And the request body property "$.device" does not exist
+    When the request "retrievePpid" is sent
+    Then the response status code is 422
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 422
+    And the response property "$.code" is "MISSING_IDENTIFIER"
+    And the response property "$.message" contains a user friendly text
+
+  # This scenario is only applicable to 3-legged access tokens
+  @DeviceIdentifier_retrievePpid_422.4_device_token_mismatch
+  Scenario: Explicit device identifier provided when a 3-legged access token identifies a different device
+    Given the header "Authorization" is set to a valid access token that identifies DEVICE1 containing SIMCARD1
+    And the request body property "$.device" exists and identifies DEVICE2 containing SIMCARD2
+    When the request "retrievePpid" is sent
+    Then the response status code is 422
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 422
+    And the response property "$.code" is "UNNECESSARY_IDENTIFIER"
+    And the response property "$.message" contains a user friendly text
+
+  # This scenario is only applicable to 3-legged access tokens
+  @DeviceIdentifier_retrievePpid_422.5_unnecessary_device_identifier_in_request
+  Scenario: Explicit device identifier provided when a 3-legged access token identifies the same device
+    Given the header "Authorization" is set to a valid access token that identifies DEVICE1 containing SIMCARD1
+    And the request body property "$.device" exists and identifies DEVICE1 containing SIMCARD1
+    When the request "retrievePpid" is sent
+    Then the response status code is 422
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 422
+    And the response property "$.code" is "UNNECESSARY_IDENTIFIER"
+    And the response property "$.message" contains a user friendly text
+
+#################
+# Error code 429
+#################
+
+  @DeviceIdentifier_retrievePpid_429.01_Too_Many_Requests
+  #To test this scenario environment has to be configured to reject requests reaching the threshold limit set.
+  Scenario: Request is rejected due to threshold policy
+    Given a valid request for "retrievePpid"
+    And the header "Authorization" is set to a valid access token
+    And the threshold of requests has been reached
+    When the request "retrievePpid" is sent
+    Then the response status code is 429
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 429
+    And the response property "$.code" is "TOO_MANY_REQUESTS"
+    And the response property "$.message" contains a user friendly text
+
+  @DeviceIdentifier_retrievePpid_429.02_Quota_Exceeded
+  #To test this scenario environment has to be configured to reject requests reaching the allocated quota.
+  Scenario: Request is rejected due to API consumer quota being reached
+    Given a valid request for "retrievePpid"
+    And the header "Authorization" is set to a valid access token
+    And the API consumer allocated quota of requests has been reached
+    When the request "retrievePpid" is sent
+    Then the response status code is 429
+    And the response header "x-correlator" has same value as the request header "x-correlator"
+    And the response header "Content-Type" is "application/json"
+    And the response property "$.status" is 429
+    And the response property "$.code" is "QUOTA_EXCEEDED"
+    And the response property "$.message" contains a user friendly text

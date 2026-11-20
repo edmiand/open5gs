@@ -33,6 +33,10 @@
       "value": "+99970000001"
     },
     {
+      "key": "registeredImei",
+      "value": "437081612581614"
+    },
+    {
       "key": "appServer",
       "value": "198.51.100.10"
     },
@@ -63,11 +67,15 @@
     {
       "key": "roamingSubscriptionId",
       "value": ""
+    },
+    {
+      "key": "roamingOnSubscriptionId",
+      "value": ""
     }
   ],
   "item": [
     {
-      "name": "0 · Foundations",
+      "name": "0 · Setup",
       "item": [
         {
           "name": "Health",
@@ -119,676 +127,14 @@
               "type": "noauth"
             }
           }
-        },
-        {
-          "name": "Get token (client_credentials)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/oauth2/token",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "oauth2",
-                "token"
-              ]
-            },
-            "description": "",
-            "auth": {
-              "type": "basic",
-              "basic": [
-                {
-                  "key": "username",
-                  "value": "{{clientId}}"
-                },
-                {
-                  "key": "password",
-                  "value": "{{clientSecret}}"
-                }
-              ]
-            },
-            "body": {
-              "mode": "urlencoded",
-              "urlencoded": [
-                {
-                  "key": "grant_type",
-                  "value": "client_credentials"
-                },
-                {
-                  "key": "scope",
-                  "value": "lab:read lab:write"
-                }
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "if (j && j.access_token !== undefined) pm.collectionVariables.set('accessToken', j.access_token);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Resolve device (lab)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/_lab/resolve",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "_lab",
-                "resolve"
-              ]
-            },
-            "description": "",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  }\n}"
-            }
-          }
         }
       ]
     },
     {
-      "name": "1 · QoS Profiles + Quality on Demand",
+      "name": "Story 1 · Identity — the cloned agent can't act",
       "item": [
         {
-          "name": "Get token (client_credentials)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/oauth2/token",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "oauth2",
-                "token"
-              ]
-            },
-            "description": "",
-            "auth": {
-              "type": "basic",
-              "basic": [
-                {
-                  "key": "username",
-                  "value": "{{clientId}}"
-                },
-                {
-                  "key": "password",
-                  "value": "{{clientSecret}}"
-                }
-              ]
-            },
-            "body": {
-              "mode": "urlencoded",
-              "urlencoded": [
-                {
-                  "key": "grant_type",
-                  "value": "client_credentials"
-                },
-                {
-                  "key": "scope",
-                  "value": "qos-profiles:read quality-on-demand:sessions:create quality-on-demand:sessions:read quality-on-demand:sessions:update quality-on-demand:sessions:delete quality-on-demand:sessions:retrieve-by-device"
-                }
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "if (j && j.access_token !== undefined) pm.collectionVariables.set('accessToken', j.access_token);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Retrieve QoS profiles",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/qos-profiles/v1/retrieve-qos-profiles",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "qos-profiles",
-                "v1",
-                "retrieve-qos-profiles"
-              ]
-            },
-            "description": "",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"status\": \"ACTIVE\"\n}"
-            }
-          }
-        },
-        {
-          "name": "Get QoS profile QOS_E",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/qos-profiles/v1/qos-profiles/QOS_E",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "qos-profiles",
-                "v1",
-                "qos-profiles",
-                "QOS_E"
-              ]
-            },
-            "description": ""
-          }
-        },
-        {
-          "name": "Create QoD session",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/quality-on-demand/v1/sessions",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "quality-on-demand",
-                "v1",
-                "sessions"
-              ]
-            },
-            "description": "",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  },\n  \"applicationServer\": {\n    \"ipv4Address\": \"{{appServer}}\"\n  },\n  \"qosProfile\": \"QOS_E\",\n  \"duration\": 120,\n  \"sink\": \"{{sink}}\"\n}"
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "if (j && j.sessionId !== undefined) pm.collectionVariables.set('sessionId', j.sessionId);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Get QoD session",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/quality-on-demand/v1/sessions/{{sessionId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "quality-on-demand",
-                "v1",
-                "sessions",
-                "{{sessionId}}"
-              ]
-            },
-            "description": ""
-          }
-        },
-        {
-          "name": "Extend QoD session",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/quality-on-demand/v1/sessions/{{sessionId}}/extend",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "quality-on-demand",
-                "v1",
-                "sessions",
-                "{{sessionId}}",
-                "extend"
-              ]
-            },
-            "description": "",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"requestedAdditionalDuration\": 60\n}"
-            }
-          }
-        },
-        {
-          "name": "Retrieve sessions by device",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/quality-on-demand/v1/retrieve-sessions",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "quality-on-demand",
-                "v1",
-                "retrieve-sessions"
-              ]
-            },
-            "description": "",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  }\n}"
-            }
-          }
-        },
-        {
-          "name": "Delete QoD session",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/quality-on-demand/v1/sessions/{{sessionId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "quality-on-demand",
-                "v1",
-                "sessions",
-                "{{sessionId}}"
-              ]
-            },
-            "description": ""
-          }
-        }
-      ]
-    },
-    {
-      "name": "2 · SIM Swap + Device Swap + subscriptions",
-      "item": [
-        {
-          "name": "Get token (client_credentials)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/oauth2/token",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "oauth2",
-                "token"
-              ]
-            },
-            "description": "",
-            "auth": {
-              "type": "basic",
-              "basic": [
-                {
-                  "key": "username",
-                  "value": "{{clientId}}"
-                },
-                {
-                  "key": "password",
-                  "value": "{{clientSecret}}"
-                }
-              ]
-            },
-            "body": {
-              "mode": "urlencoded",
-              "urlencoded": [
-                {
-                  "key": "grant_type",
-                  "value": "client_credentials"
-                },
-                {
-                  "key": "scope",
-                  "value": "sim-swap:retrieve-date sim-swap:check device-swap:retrieve-date device-swap:check sim-swap-subscriptions:org.camaraproject.sim-swap-subscriptions.v0.swapped:create sim-swap-subscriptions:read sim-swap-subscriptions:delete"
-                }
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "if (j && j.access_token !== undefined) pm.collectionVariables.set('accessToken', j.access_token);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "SIM swap — retrieve date",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/sim-swap/v2/retrieve-date",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "sim-swap",
-                "v2",
-                "retrieve-date"
-              ]
-            },
-            "description": "",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"phoneNumber\": \"{{phone}}\"\n}"
-            }
-          }
-        },
-        {
-          "name": "SIM swap — check (24 h)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/sim-swap/v2/check",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "sim-swap",
-                "v2",
-                "check"
-              ]
-            },
-            "description": "",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"phoneNumber\": \"{{phone}}\",\n  \"maxAge\": 24\n}"
-            }
-          }
-        },
-        {
-          "name": "Device swap — retrieve date",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/device-swap/v1/retrieve-date",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "device-swap",
-                "v1",
-                "retrieve-date"
-              ]
-            },
-            "description": "",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"phoneNumber\": \"{{phone}}\"\n}"
-            }
-          }
-        },
-        {
-          "name": "Device swap — check (24 h)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/device-swap/v1/check",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "device-swap",
-                "v1",
-                "check"
-              ]
-            },
-            "description": "",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"phoneNumber\": \"{{phone}}\",\n  \"maxAge\": 24\n}"
-            }
-          }
-        },
-        {
-          "name": "Subscribe: SIM swapped",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/sim-swap-subscriptions/v0.4/subscriptions",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "sim-swap-subscriptions",
-                "v0.4",
-                "subscriptions"
-              ]
-            },
-            "description": "Then move the MSISDN: tools/lab_swap.py move-msisdn <msisdn> --to <imsi>",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"protocol\": \"HTTP\",\n  \"sink\": \"{{sink}}\",\n  \"types\": [\n    \"org.camaraproject.sim-swap-subscriptions.v0.swapped\"\n  ],\n  \"config\": {\n    \"subscriptionDetail\": {\n      \"phoneNumber\": \"{{phone}}\"\n    }\n  }\n}"
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "if (j && j.id !== undefined) pm.collectionVariables.set('simSwapSubscriptionId', j.id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "List SIM swap subscriptions",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/sim-swap-subscriptions/v0.4/subscriptions",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "sim-swap-subscriptions",
-                "v0.4",
-                "subscriptions"
-              ]
-            },
-            "description": ""
-          }
-        },
-        {
-          "name": "Delete SIM swap subscription",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/sim-swap-subscriptions/v0.4/subscriptions/{{simSwapSubscriptionId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "sim-swap-subscriptions",
-                "v0.4",
-                "subscriptions",
-                "{{simSwapSubscriptionId}}"
-              ]
-            },
-            "description": ""
-          }
-        }
-      ]
-    },
-    {
-      "name": "3 · Number Verification (3-legged)",
-      "item": [
-        {
-          "name": "Authorize — RUN FROM THE UE (curl --interface uesimtun0)",
+          "name": "Authorize — RUN FROM THE DEVICE (curl --interface uesimtun0)",
           "request": {
             "method": "GET",
             "header": [
@@ -829,14 +175,14 @@
                 }
               ]
             },
-            "description": "Must reach the gateway over the UE data path (http://10.45.0.1:8090). From Postman (off-network) this returns error=access_denied — the expected negative case. Copy `code` from the device's redirect into the collection variable authCode.",
+            "description": "Must reach the gateway over the device's mobile data path (http://10.45.0.1:8090). From Postman (off-network) it returns error=access_denied — the 'cloned agent' case. Copy `code` from the device's redirect into the collection variable authCode (valid 60 s).",
             "auth": {
               "type": "noauth"
             }
           }
         },
         {
-          "name": "Exchange code → single-use token",
+          "name": "1 · Exchange code → single-use token (sub = SIM)",
           "request": {
             "method": "POST",
             "header": [
@@ -901,7 +247,7 @@
           ]
         },
         {
-          "name": "Verify phone number",
+          "name": "1 · Number Verification — is this the registered MSISDN?",
           "request": {
             "method": "POST",
             "header": [
@@ -931,11 +277,264 @@
               "raw": "{\n  \"phoneNumber\": \"{{phone}}\"\n}"
             }
           }
+        },
+        {
+          "name": "Get token (client_credentials)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/oauth2/token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "oauth2",
+                "token"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{clientId}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{clientSecret}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                },
+                {
+                  "key": "scope",
+                  "value": "device-identifier:match-identifier device-identifier:retrieve-identifier device-identifier:retrieve-type device-identifier:retrieve-ppid device-swap:check device-swap:retrieve-date"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j && j.access_token !== undefined) pm.collectionVariables.set('accessToken', j.access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2 · Device Identifier — match registered IMEI",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/device-identifier/v0.4/match-identifier",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "device-identifier",
+                "v0.4",
+                "match-identifier"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  },\n  \"imei\": \"{{registeredImei}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "2 · Device Identifier — retrieve identifier",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/device-identifier/v0.4/retrieve-identifier",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "device-identifier",
+                "v0.4",
+                "retrieve-identifier"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "2 · Device Identifier — retrieve type",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/device-identifier/v0.4/retrieve-type",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "device-identifier",
+                "v0.4",
+                "retrieve-type"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "2 · Device Identifier — retrieve PPID",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/device-identifier/v0.4/retrieve-ppid",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "device-identifier",
+                "v0.4",
+                "retrieve-ppid"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "3 · Device Swap — check (24 h)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/device-swap/v1/check",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "device-swap",
+                "v1",
+                "check"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"{{phone}}\",\n  \"maxAge\": 24\n}"
+            }
+          }
+        },
+        {
+          "name": "3 · Device Swap — retrieve date",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/device-swap/v1/retrieve-date",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "device-swap",
+                "v1",
+                "retrieve-date"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"{{phone}}\"\n}"
+            }
+          }
         }
       ]
     },
     {
-      "name": "4 · Device Roaming Status + subscriptions",
+      "name": "Story 2 · Location — approved country?",
       "item": [
         {
           "name": "Get token (client_credentials)",
@@ -999,7 +598,7 @@
           ]
         },
         {
-          "name": "Retrieve roaming status",
+          "name": "Roaming status now",
           "request": {
             "method": "POST",
             "header": [
@@ -1029,6 +628,50 @@
               "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  }\n}"
             }
           }
+        },
+        {
+          "name": "Subscribe: roaming-change-country",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/device-roaming-status-subscriptions/v0.9/subscriptions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "device-roaming-status-subscriptions",
+                "v0.9",
+                "subscriptions"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"protocol\": \"HTTP\",\n  \"sink\": \"{{sink}}\",\n  \"types\": [\n    \"org.camaraproject.device-roaming-status-subscriptions.v0.roaming-change-country\"\n  ],\n  \"config\": {\n    \"subscriptionDetail\": {\n      \"device\": {\n        \"phoneNumber\": \"{{phone}}\"\n      }\n    }\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j && j.id !== undefined) pm.collectionVariables.set('roamingSubscriptionId', j.id);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Subscribe: roaming-on",
@@ -1068,14 +711,14 @@
                 "type": "text/javascript",
                 "exec": [
                   "const j = pm.response.json();",
-                  "if (j && j.id !== undefined) pm.collectionVariables.set('roamingSubscriptionId', j.id);"
+                  "if (j && j.id !== undefined) pm.collectionVariables.set('roamingOnSubscriptionId', j.id);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "LAB: travel to France (208/01)",
+          "name": "LAB: travel to approved country (DE 262/01)",
           "request": {
             "method": "POST",
             "header": [
@@ -1101,7 +744,102 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  },\n  \"servingPlmn\": \"20801\"\n}"
+              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  },\n  \"servingPlmn\": \"26201\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Roaming status (approved)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/device-roaming-status/v1/retrieve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "device-roaming-status",
+                "v1",
+                "retrieve"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "LAB: travel to non-approved country (US 310/260)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/_lab/roaming-override",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "_lab",
+                "roaming-override"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  },\n  \"servingPlmn\": \"310260\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Roaming status (non-approved)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/device-roaming-status/v1/retrieve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "device-roaming-status",
+                "v1",
+                "retrieve"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  }\n}"
             }
           }
         },
@@ -1161,7 +899,7 @@
           }
         },
         {
-          "name": "Delete roaming subscription",
+          "name": "Delete change-country subscription",
           "request": {
             "method": "DELETE",
             "header": [
@@ -1184,11 +922,36 @@
             },
             "description": ""
           }
+        },
+        {
+          "name": "Delete roaming-on subscription",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/device-roaming-status-subscriptions/v0.9/subscriptions/{{roamingOnSubscriptionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "device-roaming-status-subscriptions",
+                "v0.9",
+                "subscriptions",
+                "{{roamingOnSubscriptionId}}"
+              ]
+            },
+            "description": ""
+          }
         }
       ]
     },
     {
-      "name": "5 · Application Profiles + Connectivity Insights",
+      "name": "Story 3 · Quality — priority only when needed",
       "item": [
         {
           "name": "Get token (client_credentials)",
@@ -1233,7 +996,7 @@
                 },
                 {
                   "key": "scope",
-                  "value": "application-profiles:create application-profiles:read application-profiles:update application-profiles:delete connectivity-insights:check lab:read"
+                  "value": "qos-profiles:read quality-on-demand:sessions:create quality-on-demand:sessions:read quality-on-demand:sessions:update quality-on-demand:sessions:delete quality-on-demand:sessions:retrieve-by-device application-profiles:create application-profiles:read application-profiles:delete connectivity-insights:check lab:read"
                 }
               ]
             }
@@ -1252,7 +1015,39 @@
           ]
         },
         {
-          "name": "Create application profile (cloud gaming)",
+          "name": "QoS profiles offered",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/qos-profiles/v1/retrieve-qos-profiles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "qos-profiles",
+                "v1",
+                "retrieve-qos-profiles"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"ACTIVE\"\n}"
+            }
+          }
+        },
+        {
+          "name": "(optional) Create live-video application profile",
           "request": {
             "method": "POST",
             "header": [
@@ -1279,7 +1074,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"networkQualityThresholds\": {\n    \"packetDelayBudget\": {\n      \"value\": 10,\n      \"unit\": \"Milliseconds\"\n    },\n    \"jitter\": {\n      \"value\": 5,\n      \"unit\": \"Milliseconds\"\n    },\n    \"packetLossErrorRate\": 2\n  }\n}"
+              "raw": "{\n  \"networkQualityThresholds\": {\n    \"packetDelayBudget\": {\n      \"value\": 100,\n      \"unit\": \"Milliseconds\"\n    },\n    \"jitter\": {\n      \"value\": 30,\n      \"unit\": \"Milliseconds\"\n    },\n    \"packetLossErrorRate\": 2\n  }\n}"
             }
           },
           "event": [
@@ -1296,32 +1091,7 @@
           ]
         },
         {
-          "name": "Get application profile",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "x-correlator",
-                "value": "{{$guid}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/application-profiles/v0.6/application-profiles/{{profileId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "application-profiles",
-                "v0.6",
-                "application-profiles",
-                "{{profileId}}"
-              ]
-            },
-            "description": ""
-          }
-        },
-        {
-          "name": "Check network quality",
+          "name": "(optional) Connectivity Insights — can the network meet it?",
           "request": {
             "method": "POST",
             "header": [
@@ -1353,7 +1123,7 @@
           }
         },
         {
-          "name": "LAB: last measurement",
+          "name": "(optional) LAB: raw measurement",
           "request": {
             "method": "GET",
             "header": [
@@ -1377,7 +1147,133 @@
           }
         },
         {
-          "name": "Delete application profile",
+          "name": "Video tool opened → QoD session QOS_M, 30 min",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/quality-on-demand/v1/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "quality-on-demand",
+                "v1",
+                "sessions"
+              ]
+            },
+            "description": "⚠ With UERANSIM the gNB drops N2 when the QoS flow reaches the radio. Run this last.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  },\n  \"applicationServer\": {\n    \"ipv4Address\": \"{{appServer}}\"\n  },\n  \"qosProfile\": \"QOS_M\",\n  \"duration\": 1800,\n  \"sink\": \"{{sink}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j && j.sessionId !== undefined) pm.collectionVariables.set('sessionId', j.sessionId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Session status (expect AVAILABLE)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/quality-on-demand/v1/sessions/{{sessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "quality-on-demand",
+                "v1",
+                "sessions",
+                "{{sessionId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Sessions of the device",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/quality-on-demand/v1/retrieve-sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "quality-on-demand",
+                "v1",
+                "retrieve-sessions"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Video tool closed → release priority",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/quality-on-demand/v1/sessions/{{sessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "quality-on-demand",
+                "v1",
+                "sessions",
+                "{{sessionId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "(optional) Delete application profile",
           "request": {
             "method": "DELETE",
             "header": [
@@ -1396,6 +1292,236 @@
                 "v0.6",
                 "application-profiles",
                 "{{profileId}}"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Extras · SIM Swap + lab helpers",
+      "item": [
+        {
+          "name": "Get token (client_credentials)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/oauth2/token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "oauth2",
+                "token"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{clientId}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{clientSecret}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                },
+                {
+                  "key": "scope",
+                  "value": "sim-swap:retrieve-date sim-swap:check sim-swap-subscriptions:org.camaraproject.sim-swap-subscriptions.v0.swapped:create sim-swap-subscriptions:read sim-swap-subscriptions:delete lab:read"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j && j.access_token !== undefined) pm.collectionVariables.set('accessToken', j.access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Resolve device (lab)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/_lab/resolve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "_lab",
+                "resolve"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "SIM swap — check (24 h)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sim-swap/v2/check",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sim-swap",
+                "v2",
+                "check"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"{{phone}}\",\n  \"maxAge\": 24\n}"
+            }
+          }
+        },
+        {
+          "name": "SIM swap — retrieve date",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sim-swap/v2/retrieve-date",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sim-swap",
+                "v2",
+                "retrieve-date"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"{{phone}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Subscribe: SIM swapped",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sim-swap-subscriptions/v0.4/subscriptions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sim-swap-subscriptions",
+                "v0.4",
+                "subscriptions"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"protocol\": \"HTTP\",\n  \"sink\": \"{{sink}}\",\n  \"types\": [\n    \"org.camaraproject.sim-swap-subscriptions.v0.swapped\"\n  ],\n  \"config\": {\n    \"subscriptionDetail\": {\n      \"phoneNumber\": \"{{phone}}\"\n    }\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j && j.id !== undefined) pm.collectionVariables.set('simSwapSubscriptionId', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete SIM swap subscription",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "x-correlator",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sim-swap-subscriptions/v0.4/subscriptions/{{simSwapSubscriptionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sim-swap-subscriptions",
+                "v0.4",
+                "subscriptions",
+                "{{simSwapSubscriptionId}}"
               ]
             },
             "description": ""

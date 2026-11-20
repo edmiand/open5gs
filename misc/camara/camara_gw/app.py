@@ -24,6 +24,7 @@ from .apis import qos_profiles as qos_profiles_api
 from .apis import number_verification, sim_swap_subs
 from .apis import roaming as roaming_api
 from .apis import connectivity as connectivity_api
+from .apis import device_identifier
 from .probe import Prober
 from .ratelimit import Limiter
 from .roaming import RoamingMonitor
@@ -34,7 +35,7 @@ from .swap_history import SwapHistory
 from .notify import Notifier
 from .profiles import load_profiles
 
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 
 
 # ── health ───────────────────────────────────────────────────────────────────
@@ -154,6 +155,7 @@ def create_app(cfg: Config | None = None, *, store: Store | None = None, sbi: Sb
     app.include_router(roaming_api.subs_router)
     app.include_router(connectivity_api.profiles_router)
     app.include_router(connectivity_api.ci_router)
+    app.include_router(device_identifier.router)
     if cfg.lab_endpoints:
         app.include_router(lab_router)
         app.include_router(roaming_api.lab_router)

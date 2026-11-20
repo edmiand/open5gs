@@ -1,0 +1,8 @@
+# TAC (first 8 digits of the IMEI) -> device type, for device-identifier retrieve-type.
+# Lab reference data; extend for the devices you register. Unknown TACs return only `tac`.
+"43708161":
+  manufacturer: UERANSIM
+  model: nr-ue (default)
+"35288200":
+  manufacturer: Lab Field Unit
+  model: FU-5G demo

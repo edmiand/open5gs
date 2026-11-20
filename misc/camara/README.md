@@ -5,10 +5,13 @@ Open5GS 5GC lab. It runs as an AF / "mini-NEF": the APIs are served northbound, 
 calls the core southbound (SBI h2c, the SMF/AMF info endpoints, MongoDB).
 Design, scope and phases: [PLAN.md](PLAN.md).
 
-**Status:** all planned phases implemented (0–6). APIs: QoS Profiles, Quality on Demand, SIM Swap
-(+ subscriptions), Device Swap, Number Verification, Device Roaming Status (+ subscriptions),
-Application Profiles, Connectivity Insights. Conformance vs the CAMARA test definitions:
-[CONFORMANCE.md](CONFORMANCE.md) (373 ✅ / 15 ⚠️ / 0 ⛔ / 2 ➖ of 390 scenarios).
+**Why:** the carrier side of EQTY Lab's AI-agent trust gateway. Three user stories (Identity, Location, Quality)
+are in [PLAN.md](PLAN.md) §0. **Presenting? Start with [demo/POC-RUNBOOK.md](demo/POC-RUNBOOK.md)** and `./demo/preflight.sh`.
+
+**Status:** v0.8.0. APIs: Number Verification, Device Identifier, Device Swap, Device Roaming Status
+(+ subscriptions), Quality on Demand, QoS Profiles, Connectivity Insights, Application Profiles, SIM Swap
+(+ subscriptions). Conformance vs the CAMARA test definitions: [CONFORMANCE.md](CONFORMANCE.md)
+(483 ✅ / 15 ⚠️ / 0 ⛔ / 2 ➖ of 500 scenarios).
 
 ## Lab prerequisites (Phase 1)
 
@@ -73,6 +76,8 @@ curl -s localhost:8090/health | jq .     # 200 UP / 503 DOWN with per-dependency
 | GET / PATCH / DELETE | `/application-profiles/v0.6/application-profiles/{id}` | `…:read` / `…:update` / `…:delete` | PATCH replaces the full threshold set |
 | POST | `/connectivity-insights/v0.7/check-network-quality` | `connectivity-insights:check` | Per-KPI "meets / unable to meet the application requirements" |
 | GET | `/_lab/connectivity-insights/last` | `lab:read` | Raw measurements behind the last verdict |
+| POST | `/device-identifier/v0.4/retrieve-identifier` · `retrieve-type` · `retrieve-ppid` | `device-identifier:<op>` | IMEI/IMEISV · TAC/make/model · pairwise PPID of the device the SIM is in |
+| POST | `/device-identifier/v0.4/match-identifier` | `device-identifier:match-identifier` | `{imei \| imeisv \| tac}` → `{match}` without revealing the identifier |
 
 ### QoD behaviour
 
@@ -86,6 +91,13 @@ curl -s localhost:8090/health | jq .     # 200 UP / 503 DOWN with per-dependency
 - Events: `org.camaraproject.quality-on-demand.v1.qos-status-changed` CloudEvents to `sink`.
   CAMARA requires https sinks; the lab allows http via `notify.allow_http_sink: true`.
 
+### Device Identifier behaviour
+
+- Source: AMF `/ue-info` `pei` for an attached UE (`lastChecked` = AMF location time). Otherwise the IMEISV the UDR last
+  stored (`lastChecked: null`). Never seen → 422 `SERVICE_NOT_APPLICABLE`.
+- IMEI = first 14 digits + Luhn check digit; TAC = first 8. Make/model come from `camara_gw/tac.yaml` (lab table).
+- PPID = HMAC-SHA256(gateway key, client ‖ IMEI): stable per API consumer, unlinkable across consumers.
+
 ### Swap behaviour
 
 - A poller (`swap.poll_interval`, 2 s) snapshots `subscribers` and records changes in `camara_events`:
@@ -98,7 +110,8 @@ curl -s localhost:8090/health | jq .     # 200 UP / 503 DOWN with per-dependency
 - SIM swap subscriptions: `swapped` CloudEvents `{phoneNumber, subscriptionId}`; `subscriptionExpireTime`,
   `subscriptionMaxEvents`, and `subscription-ended` on delete/expiry/max events. One event type per
   subscription; duplicate active subscriptions → 409 `ALREADY_EXISTS`.
-- Lab provisioning helper: `tools/lab_swap.py show | add-spare | move-msisdn | set-imeisv`.
+- Lab provisioning helper: `tools/lab_swap.py show | add-spare | move-msisdn | set-imeisv | reset-history`
+  (`reset-history` forgets recorded swaps, e.g. rehearsal residue; gateway state only).
 
 ### Number Verification behaviour
 
@@ -141,7 +154,11 @@ validated and echoed back (generated if absent).
 
 ## Demo
 
-**Full walkthrough:** `./demo/run-all.sh` (starts the CloudEvents sink on :9099 and runs every step).
+**Story walkthroughs (presentation):** `./demo/preflight.sh`, then `./demo/story1-identity.sh`,
+`./demo/story2-location.sh`, `./demo/story3-quality.sh` (Enter between steps; `PAUSE=0` scripted).
+Copy-paste curl version: [demo/POC-RUNBOOK.md](demo/POC-RUNBOOK.md).
+
+**Full per-API walkthrough:** `./demo/run-all.sh` (starts the CloudEvents sink on :9099 and runs every step).
 `PAUSE=1` for presenting, `SKIP="1"` to skip QoD (UERANSIM's gNB drops N2 on the QoS-flow modify),
 `UE_SSH=...` to include Number Verification, and `NETEM=1` for the degraded-network step.
 
@@ -170,7 +187,7 @@ for IP resolution the UE needs an active PDU session.
 ## Tests and conformance
 
 ```bash
-.venv/bin/python -m pytest                              # 150 unit tests, core mocked (MockTransport + mongomock)
+.venv/bin/python -m pytest                              # 169 unit tests, core mocked (MockTransport + mongomock)
 python3 tools/conformance_report.py > CONFORMANCE.md    # regenerate the scenario-by-scenario report
 ./setup.sh --specs                                      # re-download pinned OpenAPI specs
 ```
