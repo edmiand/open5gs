@@ -148,7 +148,7 @@ coll = {
     "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{accessToken}}", "type": "string"}]},
     "variable": [{"key": k, "value": v} for k, v in [
         ("baseUrl", "http://192.168.64.2:8090"), ("clientId", "demo-app"), ("clientSecret", "<from config.yaml>"),
-        ("phone", "+99970000001"), ("registeredImei", "437081612581614"), ("appServer", "198.51.100.10"), ("sink", "http://192.168.64.2:9099/events"),
+        ("phone", "+99970000001"), ("registeredImei", "437081612581614"), ("appServer", "198.51.100.10"), ("sink", "http://127.0.0.1:9099/events"),
         ("accessToken", ""), ("authCode", ""), ("sessionId", ""), ("profileId", ""),
         ("simSwapSubscriptionId", ""), ("roamingSubscriptionId", ""), ("roamingOnSubscriptionId", "")]],
     "item": [{"name": n, "item": items} for n, items in folders],

@@ -42,7 +42,7 @@
     },
     {
       "key": "sink",
-      "value": "http://192.168.64.2:9099/events"
+      "value": "http://127.0.0.1:9099/events"
     },
     {
       "key": "accessToken",
