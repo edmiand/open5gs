@@ -4,11 +4,11 @@
 # UERANSIM can't roam: the visited network is simulated with the LAB override (logged as such).
 #
 #   ./demo/sink.py &                 # watch the alerts
-#   ./demo/story2-location.sh        # APPROVED=26201 (DE) NOT_APPROVED=310260 (US) overridable; PAUSE=0 scripted
+#   ./demo/story2-location.sh        # APPROVED=310260 (US) NOT_APPROVED=26201 (DE) overridable; PAUSE=0 scripted
 . "$(dirname "$0")/lib.sh"
 PHONE="${PHONE:-+99970000001}"
 SINK="${SINK:-http://127.0.0.1:9099/events}"
-APPROVED="${APPROVED:-26201}"; NOT_APPROVED="${NOT_APPROVED:-310260}"; WAIT="${WAIT:-3}"
+APPROVED="${APPROVED:-310260}"; NOT_APPROVED="${NOT_APPROVED:-26201}"; WAIT="${WAIT:-3}"
 B=org.camaraproject.device-roaming-status-subscriptions.v0
 S=device-roaming-status-subscriptions
 TOKEN=$(token "device-roaming-status:read lab:write $S:read $S:delete $S:$B.roaming-on:create $S:$B.roaming-off:create $S:$B.roaming-change-country:create")

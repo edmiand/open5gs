@@ -718,7 +718,7 @@
           ]
         },
         {
-          "name": "LAB: travel to approved country (DE 262/01)",
+          "name": "LAB: travel to approved country (US 310/260)",
           "request": {
             "method": "POST",
             "header": [
@@ -744,7 +744,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  },\n  \"servingPlmn\": \"26201\"\n}"
+              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  },\n  \"servingPlmn\": \"310260\"\n}"
             }
           }
         },
@@ -781,7 +781,7 @@
           }
         },
         {
-          "name": "LAB: travel to non-approved country (US 310/260)",
+          "name": "LAB: travel to non-approved country (DE 262/01)",
           "request": {
             "method": "POST",
             "header": [
@@ -807,7 +807,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  },\n  \"servingPlmn\": \"310260\"\n}"
+              "raw": "{\n  \"device\": {\n    \"phoneNumber\": \"{{phone}}\"\n  },\n  \"servingPlmn\": \"26201\"\n}"
             }
           }
         },

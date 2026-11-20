@@ -117,13 +117,13 @@ api /device-roaming-status/v1/retrieve "{\"device\":{\"phoneNumber\":\"$PHONE\"}
 for e in roaming-on roaming-off roaming-change-country; do
   api /$S/v0.9/subscriptions "{\"protocol\":\"HTTP\",\"sink\":\"http://127.0.0.1:9099/events\",\"types\":[\"$B.$e\"],\"config\":{\"subscriptionDetail\":{\"device\":{\"phoneNumber\":\"$PHONE\"}}}}" | jq -r .id
 done
-api /_lab/roaming-override "{\"device\":{\"phoneNumber\":\"$PHONE\"},\"servingPlmn\":\"26201\"}"   # → Germany (approved)
-api /device-roaming-status/v1/retrieve "{\"device\":{\"phoneNumber\":\"$PHONE\"}}"            # roaming: true, countryCode 262, ["DE"]
-api /_lab/roaming-override "{\"device\":{\"phoneNumber\":\"$PHONE\"},\"servingPlmn\":\"310260\"}"  # → USA (not approved)
-api /device-roaming-status/v1/retrieve "{\"device\":{\"phoneNumber\":\"$PHONE\"}}"            # ["US"]
+api /_lab/roaming-override "{\"device\":{\"phoneNumber\":\"$PHONE\"},\"servingPlmn\":\"310260\"}"  # → USA (approved)
+api /device-roaming-status/v1/retrieve "{\"device\":{\"phoneNumber\":\"$PHONE\"}}"            # roaming: true, countryCode 310, ["US"]
+api /_lab/roaming-override "{\"device\":{\"phoneNumber\":\"$PHONE\"},\"servingPlmn\":\"26201\"}"   # → Germany (not approved)
+api /device-roaming-status/v1/retrieve "{\"device\":{\"phoneNumber\":\"$PHONE\"}}"            # ["DE"]
 api /_lab/roaming-override "{\"device\":{\"phoneNumber\":\"$PHONE\"},\"servingPlmn\":null}"       # home again
 ```
-Terminal A shows `roaming-on` → `roaming-change-country` (US) → `roaming-off`.
+Terminal A shows `roaming-on` (US) → `roaming-change-country` (DE) → `roaming-off`.
 Clean up: `curl -s $GW/$S/v0.9/subscriptions -H "Authorization: Bearer $T" | jq -r '.subscriptions[].id' | while read i; do curl -s -X DELETE $GW/$S/v0.9/subscriptions/$i -H "Authorization: Bearer $T"; done`
 
 *Talking points:*
