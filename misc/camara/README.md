@@ -8,7 +8,7 @@ Design, scope and phases: [PLAN.md](PLAN.md).
 **Why:** the carrier side of EQTY Lab's AI-agent trust gateway. Three user stories (Identity, Location, Quality)
 are in [PLAN.md](PLAN.md) §0. **Presenting? Start with [demo/POC-RUNBOOK.md](demo/POC-RUNBOOK.md)** and `./demo/preflight.sh`.
 
-**Status:** v0.8.0. APIs: Number Verification, Device Identifier, Device Swap, Device Roaming Status
+**Status:** v0.8.0. Resume notes: [DEVLOG.md](DEVLOG.md). APIs: Number Verification, Device Identifier, Device Swap, Device Roaming Status
 (+ subscriptions), Quality on Demand, QoS Profiles, Connectivity Insights, Application Profiles, SIM Swap
 (+ subscriptions). Conformance vs the CAMARA test definitions: [CONFORMANCE.md](CONFORMANCE.md)
 (483 ✅ / 15 ⚠️ / 0 ⛔ / 2 ➖ of 500 scenarios).
