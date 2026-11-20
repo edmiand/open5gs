@@ -36,6 +36,6 @@ TOKEN=$(token "device-swap:check sim-swap:check" 2>/dev/null)
 sw=$(curl -fsS -X POST "$CAMARA_URL/device-swap/v1/check" -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d "{\"phoneNumber\":\"$PHONE\",\"maxAge\":24}" | jq -r .swapped)
 [[ $sw == false ]] && pass "no device swap recorded in 24 h (Story 1 starts clean)" \
   || fail "device swap recorded in last 24 h (swapped=$sw)" "if it's demo residue: .venv/bin/python tools/lab_swap.py reset-history"
-ss -ltn | grep -q ':9099 ' && pass "event sink listening on :9099" || fail "no event sink on :9099" "python3 demo/sink.py   (in its own terminal)"
+ss -ltn | grep -q ':9099 ' && pass "event sink listening on :9099" || fail "no event sink on :9099" "python3 $(dirname "$0")/sink.py   (in its own terminal)"
 
 echo; echo "$ok passed, $bad to fix"; [[ $bad -eq 0 ]]
