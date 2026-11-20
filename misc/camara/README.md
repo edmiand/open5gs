@@ -154,7 +154,7 @@ validated and echoed back (generated if absent).
 
 ## Demo
 
-**Story walkthroughs (presentation):** `./demo/preflight.sh`, then `./demo/story1-identity.sh`,
+**Story walkthroughs (presentation):** `./demo/stories.sh` (all three in sequence), or `./demo/preflight.sh`, then `./demo/story1-identity.sh`,
 `./demo/story2-location.sh`, `./demo/story3-quality.sh` (Enter between steps; `PAUSE=0` scripted).
 Copy-paste curl version: [demo/POC-RUNBOOK.md](demo/POC-RUNBOOK.md).
 

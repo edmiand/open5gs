@@ -47,8 +47,10 @@ api() { curl -s -X POST "$GW$1" -H "Authorization: Bearer $T" -H 'content-type: 
 curl -s $GW/health | jq '{status, version}'
 ```
 
-Each story also has a guided script that does the same calls with pauses:
-`./demo/story1-identity.sh`, `./demo/story2-location.sh`, `./demo/story3-quality.sh` (`PAUSE=0` = no pauses).
+**One command for all three stories:** `./demo/stories.sh` runs pre-flight, then Stories 1 → 2 → 3, pausing between
+steps and asking before Story 3. `ONLY="1 2"` runs a subset; `UE_SSH=…` automates the Story 1 device step.
+Each story also runs on its own: `./demo/story1-identity.sh`, `./demo/story2-location.sh`, `./demo/story3-quality.sh`
+(`PAUSE=0` = no pauses).
 
 ---
 

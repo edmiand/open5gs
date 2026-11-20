@@ -33,7 +33,7 @@ presenting: [demo/POC-RUNBOOK.md](demo/POC-RUNBOOK.md) · conformance: [CONFORMA
    - Run `./misc/camara/demo/preflight.sh` and fix whatever it reports.
    - If the UE went idle overnight: restart `nr-ue` on the UERANSIM host (192.168.64.3).
    - If swap history has rehearsal residue: `.venv/bin/python tools/lab_swap.py reset-history`.
-2. Present from `demo/POC-RUNBOOK.md`: Story 1 → 2 → 3. Story 3 goes **last**; afterwards restart `nr-gnb` + `nr-ue`.
+2. Present with `./misc/camara/demo/stories.sh` (all three stories in sequence) or by hand from `demo/POC-RUNBOOK.md`: Story 1 → 2 → 3. Story 3 goes **last**; afterwards restart `nr-gnb` + `nr-ue`.
 3. Not yet seen live: **Story 1 device step (1b)** on the UERANSIM host (`curl --interface uesimtun0 …/oauth2/authorize`).
    Rehearse with `./demo/story1-identity.sh` (no QoD, the gNB stays up).
 4. After the presentation, pick up the open decisions below.
