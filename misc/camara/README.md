@@ -5,8 +5,9 @@ Open5GS 5GC lab. It runs as an AF / "mini-NEF": the APIs are served northbound, 
 calls the core southbound (SBI h2c, the SMF/AMF info endpoints, MongoDB).
 Design, scope and phases: [PLAN.md](PLAN.md).
 
-**Status:** Phase 4 — Device Roaming Status (+ subscriptions); Phase 3 Number Verification; Phase 2
-SIM/Device Swap (+ subscriptions); Phase 1 QoS Profiles + Quality on Demand; Phase 0 foundations.
+**Status:** Phase 5 — Application Profiles + Connectivity Insights; Phase 4 Device Roaming Status
+(+ subscriptions); Phase 3 Number Verification; Phase 2 SIM/Device Swap (+ subscriptions);
+Phase 1 QoS Profiles + Quality on Demand; Phase 0 foundations.
 
 ## Lab prerequisites (Phase 1)
 
@@ -67,6 +68,10 @@ curl -s localhost:8090/health | jq .     # 200 UP / 503 DOWN with per-dependency
 | POST / GET | `/device-roaming-status-subscriptions/v0.9/subscriptions` | `…:<event-type>:create` / `…:read` | roaming-status / roaming-on / roaming-off / roaming-change-country |
 | GET / DELETE | `/device-roaming-status-subscriptions/v0.9/subscriptions/{id}` | `…:read` / `…:delete` | Get / delete |
 | POST | `/_lab/roaming-override` | `lab:write` | Pin a device to a fake serving PLMN (`null` clears) |
+| POST | `/application-profiles/v0.6/application-profiles` | `application-profiles:create` | Create profile (network thresholds; compute stored only) |
+| GET / PATCH / DELETE | `/application-profiles/v0.6/application-profiles/{id}` | `…:read` / `…:update` / `…:delete` | PATCH replaces the full threshold set |
+| POST | `/connectivity-insights/v0.7/check-network-quality` | `connectivity-insights:check` | Per-KPI "meets / unable to meet the application requirements" |
+| GET | `/_lab/connectivity-insights/last` | `lab:read` | Raw measurements behind the last verdict |
 
 ### QoD behaviour
 
@@ -120,6 +125,16 @@ curl -s localhost:8090/health | jq .     # 200 UP / 503 DOWN with per-dependency
   `roaming-change-country` when the MCC changes while roaming. `initialEvent: true` fires immediately if the
   current state matches. One event type per subscription (multi → 422 `MULTIEVENT_SUBSCRIPTION_NOT_SUPPORTED`).
 
+### Connectivity Insights behaviour
+
+- The gateway pings the UE's PDU-session IP from the VM over `ogstun` (`ci.ping_count` × `ci.ping_interval`,
+  about 4 s; unprivileged ping). One-way delay = median RTT / 2 (CAMARA PDB = device ↔ operator gateway);
+  jitter = p99 of consecutive |ΔRTT|; loss compared with 10^-N (resolution 1/ping_count).
+- Throughput KPIs are assessed only with `ci.iperf_enabled` (iperf3 on the VM + `iperf3 -s` on the UE host);
+  otherwise they're **omitted**, not guessed. `computeResources` are stored but not evaluated.
+- `monitoringTimeStamp` is accepted; measurements are always current (no prediction).
+- The response uses the spec's field spelling `packetlossErrorRate` (the profile uses `packetLossErrorRate`).
+
 All errors use the CAMARA `ErrorInfo` shape `{status, code, message}`. `x-correlator` is
 validated and echoed back (generated if absent).
 
@@ -135,6 +150,8 @@ PROFILE=QOS_E DURATION=120 ./demo/01-qod.sh             # profiles → create �
 ./demo/03-number-verification.sh                        # prints the device command; then token + verify
 UE_SSH='ssh user@ueransim-host' ./demo/03-number-verification.sh   # fully automatic if SSH works
 ./demo/04-roaming.sh                                    # subscribe → "travel" FR → DE → home (lab override)
+./demo/05-connectivity-insights.sh                      # lenient vs strict profile on the live UE
+NETEM=1 ./demo/05-connectivity-insights.sh              # + tc netem on ogstun (sudo) → strict profile fails
 ```
 
 For a successful resolve, the demo subscriber needs an MSISDN (WebUI → subscriber → MSISDN), and

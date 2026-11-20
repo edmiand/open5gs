@@ -227,13 +227,19 @@ Phase 4 notes (2026-11-20):
 - Generic SubscriptionManager extended: device echo in event data, `initialEvent` hook, multi-event → 422.
 - Live: FR → DE → home produced roaming-on, roaming-change-country (262/DE), roaming-off, then subscription-ended ×3.
 
-### Phase 5 — Application Profiles + Connectivity Insights (3 d)
+### Phase 5 — Application Profiles + Connectivity Insights (3 d) — 🟡 implemented 2026-11-20, netem run pending (sudo)
 - Application Profiles CRUD (Mongo).
 - Probe engine: ping (count/interval) for latency, jitter and loss to the UE IP; optional iperf3 (needs `iperf3 -s` on the UE side) for throughput. UPF metrics for context.
 - `check-network-quality`: compare against profile thresholds → `connectivityQualityResult` per spec.
 - Demo: same UE, two profiles (lenient vs strict); then add `tc netem` delay on `ogstun` to show it flip.
 
 **Done when:** a strict profile flips to "does not meet" under injected netem delay.
+
+Phase 5 notes (2026-11-20):
+- Live (normal network): about 1 ms one-way, about 1 ms jitter, 0 % loss → both lenient and strict profiles "meet".
+- The netem step needs sudo (`NETEM=1 ./demo/05-connectivity-insights.sh`); not yet run.
+- iperf3 isn't installed on the VM → throughput KPIs are omitted unless enabled.
+- Spec quirks: the response field is `packetlossErrorRate` vs the profile's `packetLossErrorRate`; Duration values must be 1..999.
 
 ### Phase 6 — Demo packaging (2 d)
 - `demo/run-all.sh` scripted walkthrough; Postman/Bruno collection; README "Demo script" section.

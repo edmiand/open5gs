@@ -79,6 +79,14 @@ class Roaming(BaseModel):
     poll_interval: float = 2.0
 
 
+class Ci(BaseModel):
+    ping_count: int = Field(20, ge=2, le=200)
+    ping_interval: float = Field(0.2, ge=0.2)        # non-root ping minimum
+    iperf_enabled: bool = False                      # needs iperf3 on the VM and `iperf3 -s` on the UE host
+    iperf_port: int = 5201
+    iperf_seconds: int = Field(3, ge=1, le=30)
+
+
 class Config(BaseModel):
     listen: Listen = Field(default_factory=Listen)
     home_plmn: str | list[str] = "99970"      # MCC+MNC; list for several home PLMNs
@@ -91,6 +99,7 @@ class Config(BaseModel):
     qod: Qod = Field(default_factory=Qod)
     swap: Swap = Field(default_factory=Swap)
     roaming: Roaming = Field(default_factory=lambda: Roaming())
+    ci: Ci = Field(default_factory=lambda: Ci())
 
     @property
     def home_plmns(self) -> list[str]:
