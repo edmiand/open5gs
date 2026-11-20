@@ -74,9 +74,14 @@ class Swap(BaseModel):
     poll_interval: float = 2.0
 
 
+class Roaming(BaseModel):
+    enabled: bool = True
+    poll_interval: float = 2.0
+
+
 class Config(BaseModel):
     listen: Listen = Field(default_factory=Listen)
-    home_plmn: str = "99970"
+    home_plmn: str | list[str] = "99970"      # MCC+MNC; list for several home PLMNs
     mongo: Mongo = Field(default_factory=Mongo)
     sbi: Sbi = Field(default_factory=Sbi)
     info: Info = Field(default_factory=Info)
@@ -85,6 +90,11 @@ class Config(BaseModel):
     notify: Notify = Field(default_factory=Notify)
     qod: Qod = Field(default_factory=Qod)
     swap: Swap = Field(default_factory=Swap)
+    roaming: Roaming = Field(default_factory=lambda: Roaming())
+
+    @property
+    def home_plmns(self) -> list[str]:
+        return [self.home_plmn] if isinstance(self.home_plmn, str) else list(self.home_plmn)
 
 
 def load_config(path: str | os.PathLike | None = None) -> Config:

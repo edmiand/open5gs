@@ -112,8 +112,11 @@ class SubscriptionManager:
         q = {"api": api, "status": "ACTIVE", "types": etype, **{f"subject.{k}": v for k, v in subject.items()}}
         n = 0
         for doc in await self._find(q):
+            payload = dict(data)
+            if "device" in (doc.get("detail") or {}):       # echo the subscribed device identifier
+                payload = {"device": doc["detail"]["device"], **payload}
             self.notifier.send(doc["sink"], doc.get("sinkCredential"), etype,
-                               {**data, "subscriptionId": doc["_id"]})
+                               {**payload, "subscriptionId": doc["_id"]})
             n += 1
             sent = doc.get("eventsSent", 0) + 1
             await self._update(doc["_id"], {}, inc={"eventsSent": 1})
@@ -141,8 +144,11 @@ class SubscriptionManager:
             self._task.cancel()
 
 
+OnCreated = Callable[[Request, dict], Awaitable[None]]
+
+
 def make_subscription_router(*, api: str, version: str, event_version: str, event_names: list[str],
-                             resolve_subject: SubjectResolver) -> APIRouter:
+                             resolve_subject: SubjectResolver, on_created: OnCreated | None = None) -> APIRouter:
     """Routes for /{api}/{version}/subscriptions following the Commonalities subscription model."""
     router = APIRouter(prefix=f"/{api}/{version}", tags=[api])
     allowed = {f"org.camaraproject.{api}.{event_version}.{n}" for n in event_names}
@@ -164,7 +170,8 @@ def make_subscription_router(*, api: str, version: str, event_version: str, even
         if body.protocol != "HTTP":
             raise errors.CamaraError(400, "INVALID_PROTOCOL", "Only HTTP is supported.")
         if len(body.types) != 1:
-            raise errors.invalid_argument("Exactly one event type per subscription is allowed.")
+            raise errors.CamaraError(422, "MULTIEVENT_SUBSCRIPTION_NOT_SUPPORTED",
+                                     "Multi-event subscription is not supported.")
         if body.types[0] not in allowed:
             raise errors.invalid_argument(f"Unsupported event type {body.types[0]}.")
         validate_sink(request.app.state.config.notify, body.sink, body.sinkCredential)
@@ -183,6 +190,8 @@ def make_subscription_router(*, api: str, version: str, event_version: str, even
                "maxEvents": body.config.subscriptionMaxEvents, "eventsSent": 0, "status": "ACTIVE"}
         await asyncio.to_thread(m.col.insert_one, doc)
         log.info("subscription %s created: %s %s", doc["_id"], body.types[0], subject)
+        if body.config.initialEvent and on_created is not None:
+            await on_created(request, doc)
         return JSONResponse(SubscriptionManager.render(doc), status_code=201)
 
     @router.get("/subscriptions")

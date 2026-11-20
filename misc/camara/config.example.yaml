@@ -54,6 +54,14 @@ auth:
         - "openid"
         - "number-verification:verify"
         - "number-verification:device-phone-number:read"
+        - "lab:write"
+        - "device-roaming-status:read"
+        - "device-roaming-status-subscriptions:org.camaraproject.device-roaming-status-subscriptions.v0.roaming-status:create"
+        - "device-roaming-status-subscriptions:org.camaraproject.device-roaming-status-subscriptions.v0.roaming-on:create"
+        - "device-roaming-status-subscriptions:org.camaraproject.device-roaming-status-subscriptions.v0.roaming-off:create"
+        - "device-roaming-status-subscriptions:org.camaraproject.device-roaming-status-subscriptions.v0.roaming-change-country:create"
+        - "device-roaming-status-subscriptions:read"
+        - "device-roaming-status-subscriptions:delete"
       # authorization-code flow (Number Verification); the demo reads the code from the Location header
       redirect_uris:
         - "https://demo-app.example/callback"
@@ -72,6 +80,10 @@ qod:
 swap:
   enabled: true
   poll_interval: 2.0        # seconds between subscriber snapshots (swap detection granularity)
+
+roaming:
+  enabled: true
+  poll_interval: 2.0        # AMF /ue-info polling for roaming change detection
 
 # Lab-only helper endpoints under /_lab (resolver checks, overrides). Disable for anything but the lab.
 lab_endpoints: true

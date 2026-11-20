@@ -213,13 +213,19 @@ Phase 3 notes (2026-11-20):
 - No firewall on the VM (ufw/firewalld/nftables inactive). Lab NAT quirk: VM-local traffic to 10.45.0.1 is
   MASQUERADEd to 192.168.64.2, so the device step must run on the UERANSIM host.
 
-### Phase 4 — Device Roaming Status + Subscriptions (2 d)
+### Phase 4 — Device Roaming Status + Subscriptions (2 d) — ✅ verified live 2026-11-20
 - Roaming = AMF `ue-info.nr_tai.plmn` ≠ home PLMN (`999/70`) for that SUPI. Lab override in `camara_overrides` (`{supi, roaming, mcc}`), clearly flagged in responses' logs and README.
 - MCC → ISO 3166 country table (vendored).
 - Subscriptions: create/list/get/delete, `subscriptionExpireTime`, `subscriptionMaxEvents`, `initialEvent`; roaming poller → CloudEvents to `sink`; `subscription-ends` on expiry/delete.
 - Reuse `notify.py` / `demo/sink.py` and `subscriptions.py` (generic manager) from Phase 2.
 
 **Done when:** toggling the override fires `roaming-on`, then `roaming-change-country`, then `roaming-off`, and the sink receives them.
+
+Phase 4 notes (2026-11-20):
+- The source is AMF `/ue-info` (serving TAI PLMN + location timestamp), not UDM: simpler and includes `lastStatusTime`.
+- Spec details: `countryCode` is the MCC as an integer; `countryName` is an ISO alpha-2 **array** (`[]` when unmapped, e.g. MCC 999/001).
+- Generic SubscriptionManager extended: device echo in event data, `initialEvent` hook, multi-event → 422.
+- Live: FR → DE → home produced roaming-on, roaming-change-country (262/DE), roaming-off, then subscription-ended ×3.
 
 ### Phase 5 — Application Profiles + Connectivity Insights (3 d)
 - Application Profiles CRUD (Mongo).

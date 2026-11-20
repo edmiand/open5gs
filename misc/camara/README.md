@@ -5,8 +5,8 @@ Open5GS 5GC lab. It runs as an AF / "mini-NEF": the APIs are served northbound, 
 calls the core southbound (SBI h2c, the SMF/AMF info endpoints, MongoDB).
 Design, scope and phases: [PLAN.md](PLAN.md).
 
-**Status:** Phase 3 — Number Verification with network-based authentication; Phase 2 SIM/Device Swap
-(+ subscriptions); Phase 1 QoS Profiles + Quality on Demand; Phase 0 foundations.
+**Status:** Phase 4 — Device Roaming Status (+ subscriptions); Phase 3 Number Verification; Phase 2
+SIM/Device Swap (+ subscriptions); Phase 1 QoS Profiles + Quality on Demand; Phase 0 foundations.
 
 ## Lab prerequisites (Phase 1)
 
@@ -63,6 +63,10 @@ curl -s localhost:8090/health | jq .     # 200 UP / 503 DOWN with per-dependency
 | GET / DELETE | `/sim-swap-subscriptions/v0.4/subscriptions/{id}` | `…:read` / `…:delete` | Get / delete |
 | POST | `/number-verification/v2/verify` | 3-legged `number-verification:verify` | `{phoneNumber}` or `{hashedPhoneNumber}` → `{devicePhoneNumberVerified}` |
 | GET | `/number-verification/v2/device-phone-number` | 3-legged `number-verification:device-phone-number:read` | `{devicePhoneNumber}` |
+| POST | `/device-roaming-status/v1/retrieve` | `device-roaming-status:read` | `{lastStatusTime, roaming, countryCode?, countryName?}` |
+| POST / GET | `/device-roaming-status-subscriptions/v0.9/subscriptions` | `…:<event-type>:create` / `…:read` | roaming-status / roaming-on / roaming-off / roaming-change-country |
+| GET / DELETE | `/device-roaming-status-subscriptions/v0.9/subscriptions/{id}` | `…:read` / `…:delete` | Get / delete |
+| POST | `/_lab/roaming-override` | `lab:write` | Pin a device to a fake serving PLMN (`null` clears) |
 
 ### QoD behaviour
 
@@ -105,6 +109,17 @@ curl -s localhost:8090/health | jq .     # 200 UP / 503 DOWN with per-dependency
   `-s 10.45.0.0/16 ! -o ogstun`), so a UE can't be faked from the VM. Real UE traffic arrives on `ogstun`
   and keeps its source IP.
 
+### Roaming behaviour
+
+- Status comes from AMF `/ue-info` (`location.nr_tai.plmn`, `location.timestamp` → `lastStatusTime`). Roaming =
+  serving PLMN ∉ `home_plmn`. `countryCode` = serving MCC; `countryName` = ISO list from `camara_gw/mcc.py`
+  (a curated subset; `[]` for unknown/test MCCs). If the AMF no longer knows the UE, the last recorded status is
+  returned; if it never did → 422 `SERVICE_NOT_APPLICABLE`.
+- UERANSIM can't do real roaming, so `/_lab/roaming-override` simulates a visited PLMN (logged as a LAB OVERRIDE).
+- A poller (`roaming.poll_interval`, 2 s) detects changes → `roaming-status` + `roaming-on/off` on transitions,
+  `roaming-change-country` when the MCC changes while roaming. `initialEvent: true` fires immediately if the
+  current state matches. One event type per subscription (multi → 422 `MULTIEVENT_SUBSCRIPTION_NOT_SUPPORTED`).
+
 All errors use the CAMARA `ErrorInfo` shape `{status, code, message}`. `x-correlator` is
 validated and echoed back (generated if absent).
 
@@ -119,6 +134,7 @@ PROFILE=QOS_E DURATION=120 ./demo/01-qod.sh             # profiles → create �
 ./demo/02-swap.sh                                       # subscribe → SIM swap → device swap → restore
 ./demo/03-number-verification.sh                        # prints the device command; then token + verify
 UE_SSH='ssh user@ueransim-host' ./demo/03-number-verification.sh   # fully automatic if SSH works
+./demo/04-roaming.sh                                    # subscribe → "travel" FR → DE → home (lab override)
 ```
 
 For a successful resolve, the demo subscriber needs an MSISDN (WebUI → subscriber → MSISDN), and

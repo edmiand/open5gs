@@ -41,7 +41,7 @@ UE_INFO = {"items": [{"supi": "imsi-999700000000001", "pei": "imeisv-43708161258
 def make_cfg(**over) -> Config:
     base = {
         "auth": {"signing_key": "test-key-0123456789abcdef0123456789", "clients": [
-            {"client_id": "demo-app", "client_secret": "s3cret", "scopes": ["lab:read", "qos-profiles:read", "quality-on-demand:sessions:create", "quality-on-demand:sessions:read", "quality-on-demand:sessions:update", "quality-on-demand:sessions:delete", "quality-on-demand:sessions:retrieve-by-device", "sim-swap:retrieve-date", "sim-swap:check", "device-swap:retrieve-date", "device-swap:check", "sim-swap-subscriptions:org.camaraproject.sim-swap-subscriptions.v0.swapped:create", "sim-swap-subscriptions:read", "sim-swap-subscriptions:delete", "openid", "number-verification:verify", "number-verification:device-phone-number:read"], "redirect_uris": ["https://demo-app.example/callback"]},
+            {"client_id": "demo-app", "client_secret": "s3cret", "scopes": ["lab:read", "qos-profiles:read", "quality-on-demand:sessions:create", "quality-on-demand:sessions:read", "quality-on-demand:sessions:update", "quality-on-demand:sessions:delete", "quality-on-demand:sessions:retrieve-by-device", "sim-swap:retrieve-date", "sim-swap:check", "device-swap:retrieve-date", "device-swap:check", "sim-swap-subscriptions:org.camaraproject.sim-swap-subscriptions.v0.swapped:create", "sim-swap-subscriptions:read", "sim-swap-subscriptions:delete", "openid", "number-verification:verify", "number-verification:device-phone-number:read", "lab:write", "device-roaming-status:read", "device-roaming-status-subscriptions:org.camaraproject.device-roaming-status-subscriptions.v0.roaming-status:create", "device-roaming-status-subscriptions:org.camaraproject.device-roaming-status-subscriptions.v0.roaming-on:create", "device-roaming-status-subscriptions:org.camaraproject.device-roaming-status-subscriptions.v0.roaming-off:create", "device-roaming-status-subscriptions:org.camaraproject.device-roaming-status-subscriptions.v0.roaming-change-country:create", "device-roaming-status-subscriptions:read", "device-roaming-status-subscriptions:delete"], "redirect_uris": ["https://demo-app.example/callback"]},
             {"client_id": "no-scope", "client_secret": "s3cret", "scopes": []},
         ]},
         "lab_endpoints": True,
@@ -133,7 +133,7 @@ def build_client(core, store, client_addr=("127.0.0.1", 50000), **cfg_over):
 def client(core, store):
     with build_client(core, store, notify={"allow_http_sink": True},
                       qod={"verify_timeout": 2.0, "expiry_interval": 0.2},
-                      swap={"enabled": False}) as c:
+                      swap={"enabled": False}, roaming={"enabled": False}) as c:
         yield c
 
 
