@@ -14,12 +14,15 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import logging
 from dataclasses import dataclass, field
 
 from .. import errors
 from ..models import Device
 from .info import InfoClient, InfoUnavailable
 from .mongo import Store, e164_from_msisdn, msisdn_from_e164
+
+log = logging.getLogger("camara.resolver")
 
 
 @dataclass
@@ -119,9 +122,13 @@ class Resolver:
     async def resolve(self, device: Device | None, *, require_session: bool = False) -> ResolvedDevice:
         """Resolve a CAMARA Device to a single subscriber.
 
-        Per CAMARA Commonalities, when several identifiers are given the provider uses ONE of
-        them (precedence: phoneNumber, ipv4Address, ipv6Address) without cross-checking the
-        others, and echoes only that one back (DeviceResponse).
+        Every identifier given (phoneNumber, ipv4Address, ipv6Address) is resolved on its own.
+        Any one not found -> 404 IDENTIFIER_NOT_FOUND; found but pointing at different
+        subscribers -> 422 IDENTIFIER_MISMATCH (the Commonalities consistency check). This is
+        what binds a claimed phone number to the subscriber actually holding the UE's IP: the
+        phone path alone can answer from the AMF's retained context of a SIM that has left.
+        Only one identifier is echoed back (DeviceResponse), by precedence phoneNumber,
+        ipv4Address, ipv6Address. networkAccessIdentifier is ignored when another is present.
         """
         if device is None or device.is_empty():
             raise errors.missing_identifier()
@@ -129,24 +136,32 @@ class Resolver:
             raise errors.unsupported_identifier("networkAccessIdentifier is not supported.")
 
         pdu = None
+        found: list[tuple[str, str, dict]] = []          # (identifier, supi, echo), in precedence order
         if device.phoneNumber:
-            used = "phoneNumber"
             supi = await self.supi_for_phone(device.phoneNumber)
-            echo = {"phoneNumber": device.phoneNumber}
-        elif device.ipv4Address:
-            used = "ipv4Address"
-            pdu = await self._pdu_by_supi()
+            if supi is None:
+                raise errors.identifier_not_found()
+            found.append(("phoneNumber", supi, {"phoneNumber": device.phoneNumber}))
+        if device.ipv4Address:
+            pdu = pdu if pdu is not None else await self._pdu_by_supi()
             addrs = {a for a in (device.ipv4Address.privateAddress, device.ipv4Address.publicAddress) if a}
             supi = next((s for s, ss in pdu.items() if any(x.ipv4 in addrs for x in ss)), None)
-            echo = {"ipv4Address": device.ipv4Address.model_dump(exclude_none=True)}
-        else:
-            used = "ipv6Address"
-            pdu = await self._pdu_by_supi()
+            if supi is None:
+                raise errors.identifier_not_found()
+            found.append(("ipv4Address", supi, {"ipv4Address": device.ipv4Address.model_dump(exclude_none=True)}))
+        if device.ipv6Address:
+            pdu = pdu if pdu is not None else await self._pdu_by_supi()
             supi = next((s for s, ss in pdu.items()
                          if any(x.ipv6 and _ipv6_match(device.ipv6Address, x.ipv6) for x in ss)), None)
-            echo = {"ipv6Address": device.ipv6Address}
-        if supi is None:
-            raise errors.identifier_not_found()
+            if supi is None:
+                raise errors.identifier_not_found()
+            found.append(("ipv6Address", supi, {"ipv6Address": device.ipv6Address}))
+
+        supis = {s for _, s, _ in found}
+        if len(supis) > 1:
+            log.warning("IDENTIFIER_MISMATCH %s", ", ".join(f"{k}->{s}" for k, s, _ in found))
+            raise errors.CamaraError(422, "IDENTIFIER_MISMATCH", "Provided identifiers are not consistent.")
+        used, supi, echo = found[0]
 
         if pdu is None:
             pdu = await self._pdu_by_supi()
@@ -155,5 +170,5 @@ class Resolver:
             raise errors.service_not_applicable("Device has no active PDU session.")
 
         phone = device.phoneNumber or await self.phone_for_supi(supi)
-        return ResolvedDevice(supi=supi, phone_number=phone, sessions=sessions, matched_by=[used],
-                              device_response=echo)
+        return ResolvedDevice(supi=supi, phone_number=phone, sessions=sessions,
+                              matched_by=[k for k, _, _ in found], device_response=echo)

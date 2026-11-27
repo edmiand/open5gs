@@ -84,7 +84,7 @@ presenting: [demo/POC-RUNBOOK.md](demo/POC-RUNBOOK.md) · conformance: [CONFORMA
 - `config.yaml` (git-ignored, mode 600): JWT signing key, `demo-app` and `guardian` secrets. Backup before the
   `guardian` client was added: `config.yaml.bak-20261126-160519` (git-ignored, mode 600).
 - **Tailscale Funnel** on the existing userspace node `open5gs-vm1` (2026-11-26): `/oauth2/token`, `/device-identifier`,
-  `/device-swap` published at `https://open5gs-vm1.tail5ec2cb.ts.net` for Guardian (guardian.dev). Tailnet policy got
+  `/device-swap` (+ `/device-roaming-status` on 2026-11-27) published at `https://open5gs-vm1.tail5ec2cb.ts.net` for Guardian (guardian.dev). Tailnet policy got
   node attribute `funnel` for `tag:open5gs-vm1`. Undo: `tailscale funnel reset` (see README → Operations).
 
 ## Gotchas learned
@@ -129,3 +129,12 @@ presenting: [demo/POC-RUNBOOK.md](demo/POC-RUNBOOK.md) · conformance: [CONFORMA
   - Guardian gateway with a CAMARA plugin at `192.168.64.7`: per model call, token → Device Identifier
     `match-identifier` by IP and by phone. Demo shortcut: the UE IP comes from a header (VM1 NATs UE traffic).
   - Dedicated `guardian` client; Tailscale Funnel publishes only the paths Guardian uses (README → Operations).
+- **2026-11-27:**
+  - Roaming-gated LLM calls (Guardian plugin `custom.camara.roaming_policy`): home 999/70 and US (domestic) and CA
+    (international) allowed, DE denied (`roaming_not_allowed`), unknown → `roaming_status_unknown`. Travel = the lab
+    override. Tested on lab .7 in observability, then enforcement: DE refused while UE ping/curl kept working.
+  - `guardian` client got `device-roaming-status:read`; Funnel publishes `/device-roaming-status`. Dashboard on .6
+    uses `demo-app` for the travel control (roadmap: a dedicated 2-scope client).
+  - Wrong-SIM finding: the AMF keeps a UE context (and its PEI) after the UE leaves, so a phone-only
+    `match-identifier` for a departed SIM answers from stale data; phone + IP was not cross-checked.
+    → Resolver now resolves every identifier and returns 422 `IDENTIFIER_MISMATCH` when they disagree.

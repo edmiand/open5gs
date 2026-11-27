@@ -92,12 +92,41 @@ def test_resolve_by_ipv6_prefix(client, auth):
     assert j["supi"] == "imsi-999700000000001"
 
 
-def test_resolve_multi_identifier_uses_phone_without_crosscheck(client, auth):
-    # Commonalities: provider uses one identifier and must not cross-check the others
-    r = _resolve(client, auth, {"phoneNumber": "+99970000001", "ipv4Address": {"privateAddress": "10.45.0.3"}})
+def test_resolve_multi_identifier_consistent(client, auth):
+    # all identifiers point at UE1 -> resolved, only the phone echoed back
+    r = _resolve(client, auth, {"phoneNumber": "+99970000001", "ipv4Address": {"privateAddress": "10.45.0.2"},
+                                "ipv6Address": "2001:db8:cafe::2"})
     j = r.json()
-    assert r.status_code == 200 and j["matched_by"] == ["phoneNumber"]
+    assert r.status_code == 200, r.text
+    assert j["matched_by"] == ["phoneNumber", "ipv4Address", "ipv6Address"]
     assert j["supi"] == "imsi-999700000000001" and j["device_response"] == {"phoneNumber": "+99970000001"}
+
+
+@pytest.mark.parametrize("device", [
+    {"phoneNumber": "+99970000001", "ipv4Address": {"privateAddress": "10.45.0.3"}},   # UE1 phone, UE2 IP
+    {"phoneNumber": "+99970000002", "ipv6Address": "2001:db8:cafe::2"},                # UE2 phone, UE1 IPv6
+    {"ipv4Address": {"privateAddress": "10.45.0.3"}, "ipv6Address": "2001:db8:cafe::2"},
+])
+def test_resolve_multi_identifier_mismatch(client, auth, device):
+    r = _resolve(client, auth, device)
+    assert (r.status_code, r.json()["code"]) == (422, "IDENTIFIER_MISMATCH"), r.text
+
+
+def test_resolve_multi_identifier_unknown_ip_is_not_found(client, auth):
+    # a SIM that left the network: phone still resolves, but its claimed IP has no session
+    r = _resolve(client, auth, {"phoneNumber": "+99970000001", "ipv4Address": {"privateAddress": "10.45.9.9"}})
+    assert (r.status_code, r.json()["code"]) == (404, "IDENTIFIER_NOT_FOUND")
+
+
+def test_match_identifier_wrong_sim(client, auth):
+    # wrong-SIM case end to end: claimed phone UE1, UE IP held by UE2 -> 422, not a match
+    body = {"device": {"phoneNumber": "+99970000001", "ipv4Address": {"privateAddress": "10.45.0.3"}},
+            "imeisv": "4370816125816151"}
+    r = client.post("/device-identifier/v0.4/match-identifier", json=body, headers=auth)
+    assert (r.status_code, r.json()["code"]) == (422, "IDENTIFIER_MISMATCH"), r.text
+    body["device"]["ipv4Address"] = {"privateAddress": "10.45.0.2"}
+    r = client.post("/device-identifier/v0.4/match-identifier", json=body, headers=auth)
+    assert r.status_code == 200 and r.json()["match"] is True, r.text
 
 
 @pytest.mark.parametrize("device,status,code", [

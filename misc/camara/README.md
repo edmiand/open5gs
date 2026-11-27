@@ -91,6 +91,17 @@ curl -s localhost:8090/health | jq .     # 200 UP / 503 DOWN with per-dependency
 - Events: `org.camaraproject.quality-on-demand.v1.qos-status-changed` CloudEvents to `sink`.
   CAMARA requires https sinks; the lab allows http via `notify.allow_http_sink: true`.
 
+### Device identification (all APIs taking a `device`)
+
+- Accepted: `phoneNumber`, `ipv4Address` (`privateAddress` and/or `publicAddress`, either may equal the UE PDU IP),
+  `ipv6Address` (within the UE /64). `networkAccessIdentifier` alone → 422 `UNSUPPORTED_IDENTIFIER`; IMSI is never accepted.
+- Several identifiers → each is resolved on its own (phone → `subscribers.msisdn`; IP → SMF `/pdu-info`).
+  One not found → 404 `IDENTIFIER_NOT_FOUND`; different subscribers → 422 `IDENTIFIER_MISMATCH`
+  (log: `camara.resolver IDENTIFIER_MISMATCH phoneNumber->imsi-…, ipv4Address->imsi-…`). Only one is echoed back
+  (phone > IPv4 > IPv6). Use phone + IP to bind a claimed number to the SIM that actually holds the session: phone
+  alone can answer from the AMF's retained context of a SIM that has left.
+- The IP is only as trustworthy as its source. Guardian's `X-UE-IPv4` header is agent-supplied (demo shortcut).
+
 ### Device Identifier behaviour
 
 - Source: AMF `/ue-info` `pei` for an attached UE (`lastChecked` = AMF location time). Otherwise the IMEISV the UDR last
@@ -216,10 +227,11 @@ for open5gs-mcp). Funnel publishes **only** the paths Guardian needs at `https:/
 | `/oauth2/token` | `http://127.0.0.1:8090/oauth2/token` |
 | `/device-identifier/…` | `http://127.0.0.1:8090/device-identifier/…` |
 | `/device-swap/…` | `http://127.0.0.1:8090/device-swap/…` |
+| `/device-roaming-status/…` | `http://127.0.0.1:8090/device-roaming-status/…` |
 
 - **Not public (404):** `/health`, `/_lab/*`, `/oauth2/authorize`, every other API, the MCP server (:8080).
 - **Client:** `guardian` in `config.yaml`, scopes `device-identifier:match-identifier`,
-  `device-identifier:retrieve-identifier`, `device-swap:check`. It's the only access control (Funnel has no IP
+  `device-identifier:retrieve-identifier`, `device-swap:check`, `device-roaming-status:read`. It's the only access control (Funnel has no IP
   allowlist), so keep the secret out of chats and repos. Print it on VM1 with
   `.venv/bin/python -c "import yaml;print(next(c['client_secret'] for c in yaml.safe_load(open('config.yaml'))['auth']['clients'] if c['client_id']=='guardian'))"`.
 - **Tailnet prerequisites (admin console):** HTTPS certificates on, and node attribute `funnel` for `tag:open5gs-vm1`.
