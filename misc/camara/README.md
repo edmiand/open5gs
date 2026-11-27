@@ -202,7 +202,40 @@ reason), ➖ not applicable. Gaps found during that review are pinned by `tests/
   `rate_limit.daily_quota` (0 = off) → 429 `QUOTA_EXCEEDED`. In-memory, resets on restart.
 - **Uptime Kuma:** `kuma-push-camara.sh` pushes `/health` to its own Push monitor (separate from the core's
   `kuma-push.sh`). Config goes in `~/.config/open5gs-camara-kuma.env`; run it from cron every minute.
-- **Logs:** `journalctl -u open5gs-camara -f` (gateway `camara.*` loggers + access log).
+- **Logs:** `journalctl -u open5gs-camara -f` (gateway `camara.*` loggers + access log), or `./demo/watch-api.sh`
+  for a compact live view: one line per call (time, source, method, path, status), `public` = via Tailscale Funnel.
+
+### Public access via Tailscale Funnel (for Guardian on guardian.dev)
+
+VM1 is on the tailnet as `open5gs-vm1` (userspace `tailscaled`, systemd **user** service `open5gs-tailscaled`, set up
+for open5gs-mcp). Funnel publishes **only** the paths Guardian needs at `https://open5gs-vm1.tail5ec2cb.ts.net`
+(port 443, Let's Encrypt cert, terminated by Tailscale); everything else stays lab-only.
+
+| Public path | Proxied to |
+|---|---|
+| `/oauth2/token` | `http://127.0.0.1:8090/oauth2/token` |
+| `/device-identifier/…` | `http://127.0.0.1:8090/device-identifier/…` |
+| `/device-swap/…` | `http://127.0.0.1:8090/device-swap/…` |
+
+- **Not public (404):** `/health`, `/_lab/*`, `/oauth2/authorize`, every other API, the MCP server (:8080).
+- **Client:** `guardian` in `config.yaml`, scopes `device-identifier:match-identifier`,
+  `device-identifier:retrieve-identifier`, `device-swap:check`. It's the only access control (Funnel has no IP
+  allowlist), so keep the secret out of chats and repos. Print it on VM1 with
+  `.venv/bin/python -c "import yaml;print(next(c['client_secret'] for c in yaml.safe_load(open('config.yaml'))['auth']['clients'] if c['client_id']=='guardian'))"`.
+- **Tailnet prerequisites (admin console):** HTTPS certificates on, and node attribute `funnel` for `tag:open5gs-vm1`.
+- **Commands** (no sudo; config persists across reboots):
+  ```bash
+  TS="$HOME/.local/opt/tailscale/tailscale --socket=$XDG_RUNTIME_DIR/open5gs-tailscale/tailscaled.sock"
+  $TS funnel status
+  $TS funnel --bg --yes --set-path /device-swap http://127.0.0.1:8090/device-swap   # publish another path
+  $TS funnel --https=443 --set-path /device-swap off                               # unpublish one path
+  $TS funnel reset                                                                 # stop all public access
+  ```
+- **Logs:** Funnel callers appear as `127.0.0.1` in the access log (lab callers keep their real IP). Rate limits are per
+  client, so they still apply.
+- The lab address `http://192.168.64.2:8090` keeps working unchanged. Number Verification's `/oauth2/authorize` must stay
+  lab-only: it identifies the UE by source IP, which Funnel would replace.
+- The very first request after enabling Funnel can hang while Tailscale obtains the certificate; retry.
 
 ## Implementation notes
 

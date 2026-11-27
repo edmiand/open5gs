@@ -81,7 +81,11 @@ presenting: [demo/POC-RUNBOOK.md](demo/POC-RUNBOOK.md) · conformance: [CONFORMA
 - Gateway-owned Mongo collections (`camara_*`): events, snapshots, QoD sessions, subscriptions, app profiles, auth codes,
   used tokens, overrides, roaming state. Swap history was reset on 2026-11-20 (rehearsal residue).
 - `/etc/systemd/system/open5gs-camara.service` (installed by the user with `setup.sh --install-service`).
-- `config.yaml` (git-ignored, mode 600): JWT signing key and `demo-app` secret.
+- `config.yaml` (git-ignored, mode 600): JWT signing key, `demo-app` and `guardian` secrets. Backup before the
+  `guardian` client was added: `config.yaml.bak-20261126-160519` (git-ignored, mode 600).
+- **Tailscale Funnel** on the existing userspace node `open5gs-vm1` (2026-11-26): `/oauth2/token`, `/device-identifier`,
+  `/device-swap` published at `https://open5gs-vm1.tail5ec2cb.ts.net` for Guardian (guardian.dev). Tailnet policy got
+  node attribute `funnel` for `tag:open5gs-vm1`. Undo: `tailscale funnel reset` (see README → Operations).
 
 ## Gotchas learned
 
@@ -117,3 +121,11 @@ presenting: [demo/POC-RUNBOOK.md](demo/POC-RUNBOOK.md) · conformance: [CONFORMA
   - Architecture page published.
   - User gave the EQTY user stories → Device Identifier v0.4.0, story scripts, preflight, runbook; rehearsal fixes.
   - Branch pushed to the fork as a backup; no PR (local dev).
+- **2026-11-21 … 11-26:**
+  - Story 2: USA is the approved country, Germany is not. Branch pushed.
+  - OAI gNB + nrUE (RF simulator) brought up on `192.168.64.6` by a separate session; nrUE deregistration ngKSI fixed
+    there. It currently uses IMSI …001 (IMEISV `3528820000010101`, "Lab Field Unit"), so Device Swap for `+99970000001`
+    reports `swapped: true` and the UERANSIM IMEI no longer matches.
+  - Guardian gateway with a CAMARA plugin at `192.168.64.7`: per model call, token → Device Identifier
+    `match-identifier` by IP and by phone. Demo shortcut: the UE IP comes from a header (VM1 NATs UE traffic).
+  - Dedicated `guardian` client; Tailscale Funnel publishes only the paths Guardian uses (README → Operations).

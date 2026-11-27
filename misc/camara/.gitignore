@@ -1,4 +1,5 @@
 .venv/
 config.yaml
+config.yaml.bak-*
 __pycache__/
 .pytest_cache/
